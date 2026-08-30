@@ -2,7 +2,8 @@
 
 **The finished state of the app. Nothing about how it got here.**
 
-Version 1. Repository public at `markoboskoauroville/SAMPLE_PLAYER_MACOS`.
+Version 1, installer edition v1.1. Repository public at
+`markoboskoauroville/SAMPLE_PLAYER_MACOS`.
 
 Every decision and every gap is in [`DEVELOPMENT.md`](DEVELOPMENT.md).
 
@@ -16,12 +17,20 @@ machine where the film is cut.
 
 ## RUNNING IT
 
-    bash 3sh_i_sample_player_v1_macos.sh
+    curl -fsSL -O https://raw.githubusercontent.com/markoboskoauroville/SAMPLE_PLAYER_MACOS/main/update.sh
+    bash update.sh
     sampleplayer
 
-The installer writes `~/.sampleplayer-web` and `~/.local/bin/sampleplayer` and touches nothing
-else. Flask is the only dependency. The launcher starts the server, waits for the port file, opens
-Chrome, and holds the Mac awake until it exits.
+`update.sh` is both the install and every update after it. It fetches the installer, the server
+and the page, checks all three before touching anything, runs the installer, and leaves behind
+`sampleplayer-update` so the next update is one word.
+
+From a clone instead: `bash 3sh_i_sample_player_v1_macos.sh`.
+To remove it: `bash 3sh_i_sample_player_v1_macos.sh --wipe`.
+
+The installer writes `~/.sampleplayer-web` and `~/.local/bin` and touches nothing else. Flask is
+the only dependency. The launcher starts the server, waits for the port file, opens Chrome, and
+holds the Mac awake until it exits.
 
 ## THE LAYOUT ON DISK
 
@@ -51,7 +60,7 @@ One toggle bottom right. Recording over a cell that already holds something asks
 
     space         stop this cell, start the next
     m             swap REC and PLAY
-    ← →           flip the page
+    left / right  flip the page
     esc           stop everything
     right-click   a cell's menu
 
@@ -67,7 +76,8 @@ One toggle bottom right. Recording over a cell that already holds something asks
 ## VOICES
 
 AssemblyAI transcribes and is required. Speechify and Hume are the engines and either is enough.
-Keys go in `keys.txt` as one paste of the whole note; they are found by shape and never displayed.
+Keys go in `~/.sampleplayer-web/keys.txt` as one paste of the whole note; they are found by shape
+and never displayed.
 
 - One key is held for a whole transcription job.
 - A condemnation retries the same request on the next key.
@@ -78,9 +88,12 @@ Keys go in `keys.txt` as one paste of the whole note; they are found by shape an
 ## WHAT HAS NEVER BEEN PROVEN
 
 **Nothing here has run on a Mac.** It was written and syntax-checked on Linux, and its pure
-functions were walked directly, but no part of the following has been executed:
+functions were walked directly, but no part of the following has been executed there:
 
-- the installer, the venv, the launcher, the port file, Chrome opening
-- `getUserMedia`, the ScriptProcessor recorder, the resampler, the WAV the browser builds
-- any transcription or voice call from this machine
+- the installer, the virtual environment, the launcher, the port file, Chrome opening
+- `getUserMedia`, the recorder, the resampler, the WAV the browser builds
+- any transcription or voice call from that machine
 - the editor's drag, the loop, the playhead
+
+The likeliest first failure is the microphone: Chrome grants it to `127.0.0.1` without a
+certificate and Safari does not always.

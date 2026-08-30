@@ -88,6 +88,24 @@ at this size and would cost the property that the whole server can be read top t
 
 ---
 
+## One bug worth writing down, and it was in the tooling rather than the app
+
+Writing this repository's documents through shell heredocs ran three of them.
+
+An unquoted heredoc performs command substitution, so a backtick in prose is a command. The
+README's `` `sampleplayer-update` `` ran as a command and left a hole where the word should have
+been. Worse, the handoff's `` `bash 3sh_i_sample_player_v1_macos.sh` `` **ran the installer**, and
+its ASCII banner and thirty lines of progress output were substituted into the middle of the
+document — which is how a handoff came to contain a picture of its own installation.
+
+The heredoc had already bitten twice earlier in the same session on commit messages. The rule that
+comes out of it, and it is not subtle: **prose with backticks in it never goes through a shell.**
+Write the file, or write a script that writes the file. The apostrophes, the em dashes and the
+backticks that make documentation readable are all shell metacharacters, and a document is exactly
+the kind of text that is full of them.
+
+---
+
 # PART TWO — WHAT IS NOT PORTED YET
 
 Said plainly rather than discovered. The phone edition is at v20 and this is v1.

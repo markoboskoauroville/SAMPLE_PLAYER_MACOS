@@ -1,6 +1,6 @@
 #!/bin/bash
 # ---------------------------------------------------------------------------
-# SAMPLE PLAYER — installer for macOS                          edition: v1
+# SAMPLE PLAYER — installer for macOS                        edition: v1.1
 #
 # repo: SAMPLE_PLAYER_MACOS
 #
@@ -271,19 +271,23 @@ LAUNCHEOF
 chmod +x "$BIN/sampleplayer.new"
 mv "$BIN/sampleplayer.new" "$CMD"
 
-cat > "$BIN/sampleplayer-update.new" << 'UPDEOF'
-#!/bin/bash
-# Re-run the installer from wherever the repository was cloned.
-set -e
-REPO="${SAMPLEPLAYER_REPO:-$HOME/SAMPLE_PLAYER_MACOS}"
-if [ ! -d "$REPO" ]; then
-  echo "set SAMPLEPLAYER_REPO to the cloned repository, or clone it to $REPO"
-  exit 1
+# THE UPDATE COMMAND IS WRITTEN BY update.sh, NOT HERE.
+#
+# It used to be written here and it re-ran the installer out of a cloned
+# repository, which meant it only worked if the clone was still where it had
+# been and had no local changes in it. update.sh fetches and CHECKS everything
+# before it touches the install, which is the behaviour worth having, and it
+# leaves itself behind — so whichever way this app was installed, updating it
+# is one word.
+#
+# Installed straight from the repository rather than through update.sh? Then
+# there is no sampleplayer-update yet, and this says so rather than leaving a
+# command that half works.
+if [ ! -x "$BIN/sampleplayer-update" ]; then
+  step "no update command yet — install once through update.sh to get one:"
+  printf '     %scurl -fsSL -O %s/update.sh && bash update.sh%s\n' \
+    "$DIM" "https://raw.githubusercontent.com/markoboskoauroville/SAMPLE_PLAYER_MACOS/main" "$OFF"
 fi
-cd "$REPO" && git pull --ff-only && bash 3sh_i_sample_player_v1_macos.sh
-UPDEOF
-chmod +x "$BIN/sampleplayer-update.new"
-mv "$BIN/sampleplayer-update.new" "$BIN/sampleplayer-update"
 good "launcher at $CMD"
 
 # ---------------------------------------------------------------------- PATH --
