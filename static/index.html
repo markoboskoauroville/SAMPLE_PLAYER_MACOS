@@ -35,7 +35,7 @@ button:disabled{opacity:.4;cursor:default}
 .cell.full .n{color:#fff}
 .cell canvas{width:100%;flex:1;min-height:0}
 .cell .w{white-space:nowrap;overflow:hidden;color:var(--text);font-size:10px}
-#bar{padding-top:6px;display:flex;gap:6px;justify-content:flex-end}
+#bar{padding-bottom:6px;display:flex;gap:6px;justify-content:flex-end}
 #screen{position:fixed;inset:0;background:#000;padding:12px;overflow:auto;display:none}
 #screen.on{display:block}
 h2{font-size:14px;font-weight:normal;margin:0 0 8px}
@@ -64,10 +64,18 @@ canvas#big{width:100%;height:180px;border:1px solid var(--edge);display:block}
 </head>
 <body>
 <div id="app">
+  <!--
+    THE CONTROLS ARE AT THE TOP HERE AND AT THE BOTTOM ON THE PHONE.
+
+    The same rule as the close button, for the same reason: a thumb rests near the bottom of a
+    phone and a pointer starts at the top of a window, next to the tabs and the address bar it
+    just came from. Reaching down a large display for a mode toggle is a journey; reaching down a
+    phone is where the hand already is.
+  -->
+  <div id="bar"></div>
   <div id="head"></div>
   <div id="grid"></div>
   <div id="stage"></div>
-  <div id="bar"></div>
 </div>
 <div id="screen"></div>
 
@@ -382,16 +390,18 @@ let ed = null;
 
 async function openCell(i){
   const c = S.cells[i];
-  ed = {i, inMs: c.inMs, outMs: c.outMs || c.lengthMs, zoom: null};
+  ed = {i, inMs: c.inMs, outMs: c.outMs || c.lengthMs, zoom: null, hoverX: null};
   screen("Cell " + String(i+1).padStart(2,"0"),
     `<canvas id="big"></canvas>
      <div style="margin:6px 0;font-size:10px">
        <span style="color:var(--amber)">▌left click = in</span>
-       <span style="color:var(--red);margin-left:14px">▌right click = out</span></div>
+       <span style="color:var(--red);margin-left:14px">▌right click = out</span>
+       <span style="color:var(--dim);margin-left:14px">i / o mark at the playhead</span></div>
      <div id="edread" style="color:var(--label)"></div>
      <div class="row" style="margin-top:8px">
        <button style="flex:2;background:var(--amber);color:#000" onclick="edPlay()">Play</button>
        <button style="flex:1" onclick="edZoom()">Zoom</button>
+       <button style="flex:1" onclick="edWhole()">Whole take</button>
        <button style="flex:1" onclick="loopFlag(${i})">${c.loop ? "∞ on" : "∞"}</button></div>
 
      ${c.words ? `<div style="color:var(--label);margin:12px 0">${escapeHtml(c.words)}</div>` : ""}
@@ -410,6 +420,13 @@ async function openCell(i){
      chance to slip. Nothing is cut either way — the points are two numbers beside the recording
      and the audio is untouched.
      <b>Play</b>Plays between the points, once, with the mark running between them.
+     <b>i and o</b>Mark the start and the stop at the playhead while the cell is playing, or at
+     the pointer when it is not. Clicking puts a point where the eye says it should be, read off
+     the waveform; marking puts it where the ear says, at the instant something was heard. The two
+     disagree more often than they agree — a breath looks like nothing and sounds like a second of
+     hiss.
+     <b>Whole take</b>Puts both points back to the ends. A right click a little too far left moves
+     the stop, and clicking is what set the points, so there is no way back to the ends by clicking.
      <b>Zoom</b>Shows only the part between the points with a little either side, so half a second
      of breath is something a pointer can land on. Press again for the whole recording.
      <b>∞</b>A flag, not a start button. A marked cell carries ∞ on the grid; in play mode one
@@ -429,6 +446,11 @@ async function openCell(i){
     where it is wanted with no travel, no press-and-hold, and no chance of slipping off the
     canvas mid-gesture and leaving a handle somewhere nobody asked for.
   */
+  cv.onpointermove = e => {
+    const r = cv.getBoundingClientRect();
+    ed.hoverX = (e.clientX - r.left) / r.width;
+  };
+  cv.onpointerleave = () => { ed.hoverX = null; };
   cv.onclick = e => setPoint(e, true);
   cv.oncontextmenu = e => { e.preventDefault(); setPoint(e, false); };
   paintBig();
@@ -488,6 +510,52 @@ function paintBig(){
   $("#edread").textContent =
     `in ${(ed.inMs/1000).toFixed(2)}s   out ${(ed.outMs/1000).toFixed(2)}s   ` +
     `plays ${((ed.outMs-ed.inMs)/1000).toFixed(2)}s of ${((c.lengthMs||0)/1000).toFixed(2)}s`;
+}
+
+/*
+  WHOLE TAKE, BACK AGAIN AND FOR A DIFFERENT REASON THAN IT LEFT.
+
+  It was removed from the phone because it was spending half a row on something one drag undoes,
+  and Zoom earned that space. Here it costs a quarter of a row and undoes something a MIS-CLICK
+  does: a right click a little too far left moves the out point, and there is no way back to the
+  ends by clicking, because clicking is what set them.
+*/
+function edWhole(){
+  ed.inMs = 0;
+  ed.outMs = S.cells[ed.i].lengthMs;
+  ed.zoom = null;
+  paintBig();
+  save();
+}
+window.edWhole = edWhole;
+
+/*
+  i AND o MARK THE POINTS WHERE THE SOUND IS, which is what an editor's keyboard is for.
+
+  Clicking puts a point where the EYE says it should be, read off a waveform. Marking puts it
+  where the EAR says, at the instant something was heard — and the two disagree more often than
+  they agree, because a breath looks like nothing and sounds like a second of hiss.
+
+  While the cell is playing they mark at the playhead. While it is not, they mark wherever the
+  pointer last was over the waveform, so the keys still work as a second hand for the mouse.
+*/
+function mark(isIn){
+  if (!ed) return;
+  const c = S.cells[ed.i];
+  const win = ed.zoom || [0, c.lengthMs || 1];
+  let ms;
+  if (S.playing === ed.i){
+    ms = Math.round(ed.inMs + S.playFrom * (ed.outMs - ed.inMs));
+  } else if (ed.hoverX != null){
+    ms = Math.round(win[0] + ed.hoverX * (win[1] - win[0]));
+  } else {
+    return stage("nothing to mark — play it, or point at the waveform");
+  }
+  if (isIn) ed.inMs = Math.max(0, Math.min(ms, ed.outMs - 120));
+  else      ed.outMs = Math.min(c.lengthMs, Math.max(ms, ed.inMs + 120));
+  paintBig();
+  save();
+  stage((isIn ? "in " : "out ") + (ms/1000).toFixed(2) + "s");
 }
 
 async function save(){
@@ -557,44 +625,222 @@ function readText(i){
 window.readText = readText;
 
 /* ───────────────────────────────────────────────────────── voice chooser ── */
-async function chooser(slot, engine){
-  S.engine = engine;
-  screen(engine === "hume" ? "Hume voices" : "Speechify voices",
-    `<input id="q" type="search" placeholder="find — try: brit female">
-     <div id="facets" style="margin:6px 0"></div>
-     <div id="vlist">loading the catalogue…</div>`, "");
-  const d = await (await fetch("/api/voices/" + engine)).json();
-  S.voices = d.voices || [];
-  if (d.why) stage(d.why);
-  $("#q").oninput = () => renderVoices(slot);
-  renderVoices(slot);
-}
-window.chooser = chooser;
+/*
+  THE VOICE BROWSER.
 
-/* Word-prefix and multi-term: "brit female" narrows two axes at once although those two words
-   never appear next to each other in any voice. */
+  Speechify publishes 992 voices and Hume 160. A list that long is not a choice, it is a wall, and
+  a search box alone only helps somebody who already knows what they are looking for. Everything
+  here exists to cut the wall down without anybody having to know a name.
+
+  THE FACETS ARE BUILT FROM THE CATALOGUE, NOT FROM A LIST IN THIS FILE. Both providers already
+  tag their voices — Hume with LANGUAGE, ACCENT, GENDER and AGE, Speechify with namespaced tags
+  like use-case:, timbre:, pitch: and style: — so the chips are whatever is actually in the data.
+  A value either provider adds next month appears here without anybody editing this app, and a
+  value that stops being used disappears the same way.
+
+  WITHIN A FACET THE VALUES ARE AN OR, ACROSS FACETS AN AND. Tapping male and female is everybody,
+  which is what tapping both should mean; tapping female and British is British women. Anything
+  else and the chips would have to be read as a formula rather than pressed.
+
+  EVERY CHIP CARRIES ITS COUNT, and the count is computed against the OTHER filters rather than
+  against the whole catalogue — so a chip that would leave nothing says 0 before it is pressed
+  instead of after, and the browser never leads anybody into an empty room.
+*/
+
+/* The order is fixed even though the values are not. A filter row that rearranges itself between
+   sessions is a filter row that has to be read every time. */
+const FACET_ORDER = [
+  "gender", "age", "language", "accent", "use-case",
+  "timbre", "pitch", "style", "content-type", "fictiongenre", "label",
+];
+
+/* One voice, flattened to `facet: [values]`. Built once per catalogue rather than per keystroke:
+   at 992 voices and a dozen facets this is the difference between a browser that answers as you
+   type and one that stutters. */
+function facetsOf(v){
+  const f = {};
+  const put = (k, val) => {
+    if (!val) return;
+    const key = String(k).toLowerCase(), s = String(val).toLowerCase();
+    (f[key] = f[key] || []).push(s);
+  };
+  put("gender", v.gender); put("age", v.age);
+  put("language", v.language); put("accent", v.accent);
+  (v.tags || []).forEach(t => {
+    const i = t.indexOf(":");
+    if (i > 0) put(t.slice(0, i), t.slice(i + 1));
+  });
+  return f;
+}
+
+function indexCatalogue(voices){
+  voices.forEach(v => {
+    v._f = facetsOf(v);
+    v._hay = [v.name, v.gender, v.age, v.language, v.accent, (v.tags || []).join(" ")]
+      .join(" ").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  });
+  const present = {};
+  voices.forEach(v => Object.entries(v._f).forEach(([k, vals]) => {
+    const set = present[k] = present[k] || new Map();
+    vals.forEach(x => set.set(x, (set.get(x) || 0) + 1));
+  }));
+  // Facets in the fixed order first, then anything the providers added that this file has never
+  // heard of — which is the whole point of deriving them.
+  const known = FACET_ORDER.filter(k => present[k]);
+  const rest = Object.keys(present).filter(k => !FACET_ORDER.includes(k) && k !== "locale").sort();
+  return {present, order: known.concat(rest)};
+}
+
+/* Word-prefix and multi-term. "brit female" narrows two axes at once although those two words
+   never appear next to each other in any voice, and a plain substring search would find neither
+   because it would be looking for the phrase. */
 function matches(v, q){
   const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
   if (!terms.length) return true;
-  const words = [v.name, v.gender, v.age, v.language, v.accent, (v.tags||[]).join(" ")]
-    .join(" ").toLowerCase().split(/[^a-z0-9]+/);
-  return terms.every(t => words.some(w => w.startsWith(t)));
+  return terms.every(t => v._hay.some(w => w.startsWith(t)));
 }
 
-function renderVoices(slot){
+function passesFilters(v, filters, except){
+  return Object.entries(filters).every(([facet, wanted]) => {
+    if (facet === except || !wanted.size) return true;
+    if (facet === "★") return S.stars.has(key(v));
+    if (facet === "✦") return !!v.flagship;
+    const have = v._f[facet] || [];
+    return [...wanted].some(w => have.includes(w));
+  });
+}
+
+function selectVoices(voices, q, filters){
+  return voices
+    .filter(v => passesFilters(v, filters))
+    .filter(v => matches(v, q))
+    .sort((a, b) =>
+      (S.stars.has(key(b)) - S.stars.has(key(a))) ||
+      (b.flagship - a.flagship) ||
+      a.name.localeCompare(b.name));
+}
+
+async function chooser(slot, engine){
+  S.engine = engine;
+  S.slot = slot;
+  S.filters = {};
+  S.openFacet = null;
+  screen(engine === "hume" ? "Hume voices" : "Speechify voices",
+    `<input id="q" type="search" placeholder="find — try: brit female, or meditation">
+     <div id="facets" style="margin:8px 0"></div>
+     <div id="vcount" style="color:var(--dim);margin-bottom:6px"></div>
+     <div id="vlist">loading the catalogue…</div>`,
+    `<b>Search</b>Words, not a phrase. Every term has to appear somewhere in the voice and each
+     matches on a prefix, so "brit female" finds a British woman and "med" finds meditation.
+     <b>The chips</b>Built from the catalogue itself, so they are whatever the two providers
+     actually tag their voices with. Within one row they are an OR — male and female is everybody.
+     Between rows they are an AND. The number on each is how many voices it would leave given
+     everything else already chosen, so a chip that says 0 will not be pressed by mistake.
+     <b>★</b>Yours, not the provider's. Starred voices sort above everything and can be filtered
+     to on their own.
+     <b>✦</b>The flagship set: Speechify's newest model carries only those eight and answers 400
+     for every other voice. Hume publishes no popularity of any kind, so nothing there is marked.`);
+
+  const d = await (await fetch("/api/voices/" + engine)).json();
+  S.voices = d.voices || [];
+  if (d.why) stage(d.why);
+  S.index = indexCatalogue(S.voices);
+  $("#q").oninput = renderVoices;
+  renderVoices();
+}
+window.chooser = chooser;
+
+function chip(label, on, count, onTap, accent){
+  const dead = count === 0 && !on;
+  return `<span class="chip${on ? " on" : ""}" style="${dead ? "opacity:.35" : ""}${
+    accent && on ? ";background:" + accent + ";border-color:" + accent : ""}"
+    onclick="${onTap}">${label}${count === undefined ? "" : " " + count}</span>`;
+}
+
+function renderFacets(){
   const q = $("#q").value;
-  const list = S.voices.filter(v => matches(v,q)).sort((a,b) =>
-    (S.stars.has(key(b)) - S.stars.has(key(a))) || (b.flagship - a.flagship) ||
-    a.name.localeCompare(b.name));
-  $("#vlist").innerHTML = `<div style="color:var(--dim)">${list.length} of ${S.voices.length}</div>` +
-    list.slice(0, 400).map(v => {
-      const g = (v.gender||"").toLowerCase();
-      return `<div class="vrow" onclick="card(${slot},'${v.engine}','${v.id}')">
-        <span class="${g==='male'?'male':g==='female'?'female':''}">${escapeHtml(v.name)}</span>
-        ${S.stars.has(key(v)) ? " ★" : ""}${v.flagship ? " ✦" : ""}
-        <div style="color:var(--label);font-size:10px">
-          ${[v.gender,v.age,v.language,v.accent].filter(Boolean).join(" · ")}</div></div>`;
-    }).join("");
+  const F = S.filters;
+  const starCount = S.voices.filter(v => S.stars.has(key(v)) && matches(v, q)).length;
+  const flagCount = S.voices.filter(v => v.flagship && matches(v, q)).length;
+
+  let html = chip("★ starred", !!(F["★"] && F["★"].size), starCount, "toggleFlag('★')");
+  if (flagCount) html += chip("✦ flagship", !!(F["✦"] && F["✦"].size), flagCount, "toggleFlag('✦')");
+  html += ` <span class="chip" onclick="clearFilters()">clear</span>`;
+  html += "<br>";
+
+  S.index.order.forEach(facet => {
+    const chosen = F[facet] ? F[facet].size : 0;
+    html += chip(facet + (chosen ? " (" + chosen + ")" : ""),
+                 S.openFacet === facet || chosen > 0, undefined,
+                 `openFacet('${facet}')`);
+  });
+
+  if (S.openFacet && S.index.present[S.openFacet]){
+    html += `<div style="margin-top:6px">`;
+    // Counts computed with THIS facet's own selection ignored, so the numbers do not collapse to
+    // zero the moment one value in the row is picked.
+    const pool = S.voices.filter(v => passesFilters(v, F, S.openFacet) && matches(v, q));
+    const values = [...S.index.present[S.openFacet].keys()].sort();
+    values.forEach(val => {
+      const n = pool.filter(v => (v._f[S.openFacet] || []).includes(val)).length;
+      const on = !!(F[S.openFacet] && F[S.openFacet].has(val));
+      html += chip(val, on, n, `toggleValue('${S.openFacet}','${val.replace(/'/g, "\\'")}')`,
+                   "#60a5fa");
+    });
+    html += `</div>`;
+  }
+  $("#facets").innerHTML = html;
+}
+
+function toggleFlag(k){
+  S.filters[k] = (S.filters[k] && S.filters[k].size) ? new Set() : new Set(["on"]);
+  renderVoices();
+}
+window.toggleFlag = toggleFlag;
+
+function openFacet(f){
+  S.openFacet = S.openFacet === f ? null : f;
+  renderVoices();
+}
+window.openFacet = openFacet;
+
+function toggleValue(f, v){
+  const set = S.filters[f] || new Set();
+  set.has(v) ? set.delete(v) : set.add(v);
+  S.filters[f] = set;
+  renderVoices();
+}
+window.toggleValue = toggleValue;
+
+function clearFilters(){
+  S.filters = {};
+  S.openFacet = null;
+  $("#q").value = "";
+  renderVoices();
+}
+window.clearFilters = clearFilters;
+
+function renderVoices(){
+  renderFacets();
+  const q = $("#q").value;
+  const list = selectVoices(S.voices, q, S.filters);
+  $("#vcount").textContent = list.length + " of " + S.voices.length;
+  // Four hundred rows is already more than anybody scrolls; past that the answer is another chip,
+  // not more scrolling, and saying so is more useful than rendering it.
+  $("#vlist").innerHTML = list.slice(0, 400).map(v => {
+    const g = (v.gender || "").toLowerCase();
+    const facets = [v.gender, v.age, v.language, v.accent].filter(Boolean).join(" · ");
+    const extra = (v.tags || [])
+      .filter(t => /^(use-case|timbre|style):/.test(t))
+      .map(t => t.split(":")[1]).slice(0, 6).join("  ");
+    return `<div class="vrow" onclick="card(${S.slot},'${v.engine}','${v.id}')">
+      <span class="${g === "male" ? "male" : g === "female" ? "female" : ""}">${escapeHtml(v.name)}</span>
+      ${S.stars.has(key(v)) ? " ★" : ""}${v.flagship ? " ✦" : ""}
+      <div style="color:var(--label);font-size:10px">${facets}</div>
+      ${extra ? `<div style="color:var(--dim);font-size:9px">${extra}</div>` : ""}</div>`;
+  }).join("") + (list.length > 400
+    ? `<div style="color:var(--dim);padding:8px">…and ${list.length - 400} more. Narrow it with a chip rather than scrolling.</div>`
+    : "");
 }
 function key(v){ return v.engine + "/" + v.id; }
 
@@ -649,6 +895,10 @@ window.card = card;
 function star(k){
   S.stars.has(k) ? S.stars.delete(k) : S.stars.add(k);
   localStorage.stars = JSON.stringify([...S.stars]);
+  // The card is showing, so redraw it: a star that does not change when pressed is a star nobody
+  // trusts they have set.
+  const [engine, id] = k.split("/");
+  card(S.slot, engine, id);
 }
 window.star = star;
 
@@ -774,6 +1024,12 @@ document.addEventListener("keydown", e => {
   if (e.key === " "){ e.preventDefault(); nextCell(); }
   if (e.key === "Escape"){ stopAudio(); if (S.recording !== null) stopRecording(); closeScreen(); }
   if (e.key === "m"){ stopAudio(); S.mode = S.mode === "play" ? "rec" : "play"; draw(); }
+  // i and o belong to the cell page and are ignored everywhere else, so they cannot mark a point
+  // on a cell nobody is looking at.
+  if (ed && $("#screen").className === "on"){
+    if (e.key === "i"){ e.preventDefault(); mark(true); }
+    if (e.key === "o"){ e.preventDefault(); mark(false); }
+  }
   if (e.key === "ArrowRight"){ S.page = Math.min(layout().pageCount-1, S.page+1); draw(); }
   if (e.key === "ArrowLeft"){ S.page = Math.max(0, S.page-1); draw(); }
 });
