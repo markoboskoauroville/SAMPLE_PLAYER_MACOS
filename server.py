@@ -911,6 +911,60 @@ def slugify(text, fallback):
     return t
 
 
+@app.route("/api/render", methods=["POST"])
+def render():
+    """
+    SPEAK A LINE AND HAND IT BACK AS A FILE, without touching any cell.
+
+    The download button under a text box is not the same thing as the one on the cell. That one
+    hands over what the cell already holds; this one is for a line that may never become a cell at
+    all — a title read six ways to hear which lands, a name for a client, one word for a transition.
+
+    THROUGH THE SAME CACHE AS EVERYTHING ELSE, so pressing download after hearing it costs nothing:
+    the audition already paid for those bytes and they are on disk under the voice, the words and
+    the tags. Downloading a line twice is free, and downloading one you have never heard costs
+    exactly one call.
+
+    The name is the line itself with the voice after it, because three versions of one sentence in
+    three voices in a downloads folder are otherwise three files called the same thing.
+    """
+    b = request.get_json(force=True) or {}
+    line = (b.get("text") or "").strip()
+    if not line:
+        return jsonify({"ok": False, "why": "nothing to render"}), 400
+
+    ck = cache_key("speak", b["engine"], b["voiceId"], b.get("model", ""), line,
+                   b.get("direction", ""))
+    data = cached_audio(ck)
+    from_cache = data is not None
+    if data is None:
+        data, why = speak(b["engine"], b["voiceId"], b.get("model", ""), line,
+                          b.get("direction", ""))
+        if data is None:
+            return jsonify({"ok": False, "why": why}), 502
+        put_audio(ck, data)
+
+    name = slugify(strip_tags(line), "line")
+    voice = slugify(b.get("name", ""), "")
+    # A HYPHEN AND NOT AN EM DASH. Two header forms are sent: filename* carries UTF-8 and every
+    # current browser prefers it, but the plain filename= fallback is ASCII, and an em dash comes
+    # out of it as a question mark — so the one character that is always ours to choose should not
+    # be the one that breaks. Croatian in the line itself survives through filename*; the
+    # separator survives through both.
+    filename = (name + (" - " + voice if voice else "") + ".wav")
+
+    from flask import Response
+    return Response(data, mimetype="audio/wav", headers={
+        # RFC 5987 as well as the plain form: the line is very often not ASCII — Croatian is the
+        # first language this app ever recorded — and a bare filename= drops every accented
+        # character or, on some browsers, the whole name.
+        "Content-Disposition": "attachment; filename=\"%s\"; filename*=UTF-8''%s"
+                               % (filename.encode("ascii", "replace").decode(),
+                                  __import__("urllib.parse", fromlist=["quote"]).quote(filename)),
+        "X-From-Cache": "1" if from_cache else "0",
+    })
+
+
 @app.route("/api/download/<int:slot>")
 def download(slot):
     """

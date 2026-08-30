@@ -577,6 +577,7 @@ async function openCell(i){
      <div class="row" style="margin-top:6px">
        <button style="flex:2;background:var(--amber);color:#000"
                onclick="performText(${i})">Perform this text</button>
+       <button style="flex:1" onclick="renderDownload('${c.voice || ""}','${c.voiceId ? c.voiceId.split("/")[1] : ""}','')">⤓ Download</button>
        <button style="flex:1" onclick="transcribe(${i})">Transcribe</button>
        <button style="flex:1" onclick="readText(${i})">Open a file</button></div>
      <div class="row" style="margin-top:6px">
@@ -610,6 +611,9 @@ async function openCell(i){
      wrong. Everything writes into the same box, and Perform reads whatever is there.
      <b>Perform this text</b>Speaks the box in the cell's chosen voice and stores it beside your
      recording. If no voice is chosen yet it asks for one first. Your take is never replaced.
+     <b>⤓ Download</b>Renders the box in the cell's voice and saves it straight to disk without
+     storing it in the cell — for a line you want as a file and not as part of the set. It uses
+     the same cache, so a line already heard or generated costs nothing.
      <b>Transcribe</b>The words become the cell's text, exactly as spoken.
      <b>Read a text file</b>The other direction: hand it a file and a voice reads it. If this cell
      has no voice yet, pick one first.
@@ -1193,6 +1197,7 @@ function card(slot, engine, id){
      <div class="row" style="margin:6px 0">
        <button style="flex:1" onclick="saveLine(${slot})">Save the line</button>
        <button style="flex:1" onclick="hearLine(${slot},'${engine}','${id}')">Hear the line</button>
+       <button style="flex:1" onclick="renderDownload('${engine}','${id}','')">⤓ Download</button>
        <button style="flex:1;background:var(--amber);color:#000"
                onclick="use(${slot},'${engine}','${id}')">Use this voice</button></div>
 
@@ -1214,6 +1219,11 @@ function card(slot, engine, id){
      correction made while auditioning is the one that is kept.
      <b>Hear the line</b>Reads exactly what is in the box, tags and all, in this voice. Cached
      under the voice and the words, so hearing it twice costs nothing the second time.
+     <b>⤓ Download</b>Renders whatever is in the box in this voice and saves it, without touching
+     the cell — for a line that may never become one. Same cache as Hear the line, so pressing this
+     after hearing it costs nothing. The file is named after the line with the voice after it,
+     because three versions of one sentence in three voices are otherwise three files with the
+     same name.
      <b>The emotions</b>They insert a tag at the cursor rather than setting a mode. Everything
      after &lt;angry&gt; is read that way until the next tag, so one line can turn on a word. Hume
      receives the pieces as one request and joins them itself, which is why there is no click at
@@ -1293,6 +1303,55 @@ async function dropEmotion(label){
   renderEmotions();
 }
 window.dropEmotion = dropEmotion;
+
+/*
+  RENDER WHAT IS IN THE BOX AND SAVE IT, WITHOUT TOUCHING THE CELL.
+
+  This is not the cell's download button. That one hands over what the cell already holds; this is
+  for a line that may never become a cell — a title read six ways to hear which one lands, a name
+  for a client, one word for a transition.
+
+  A BLOB AND AN OBJECT URL RATHER THAN AN ANCHOR AT THE ROUTE. The line has to be POSTed: it can be
+  two thousand characters with angle brackets in it, which is not something to put in a query
+  string. So the bytes come back through fetch and the browser is handed a blob — and the object
+  URL is revoked afterwards, because one left behind pins a whole WAV in memory for the life of
+  the page and a session of auditioning would pin dozens.
+
+  It goes through the same cache as the audition, so pressing this after hearing it costs nothing.
+*/
+async function renderDownload(engine, id, direction){
+  const box = $("#celltext");
+  const line = box ? box.value.trim() : "";
+  if (!line) return stage("nothing in the box to render");
+  if (!engine || !id) return stage("pick a voice first");
+  const v = (S.voices || []).find(x => x.engine === engine && x.id === id);
+
+  const res = await busy("rendering the line…", () =>
+    fetch("/api/render", {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({engine, voiceId: id, model: (v && v.model) || "",
+                            name: (v && v.name) || engine, text: line,
+                            direction: direction || ""})}));
+
+  if (!res.ok){
+    const d = await res.json().catch(() => ({why: "render failed"}));
+    return stage(d.why || "render failed");
+  }
+
+  // The server names the file; taking it from the header rather than rebuilding it here means one
+  // place decides what a rendered line is called.
+  const cd = res.headers.get("Content-Disposition") || "";
+  const star = /filename\*=UTF-8''([^;]+)/.exec(cd);
+  const plain = /filename="([^"]+)"/.exec(cd);
+  const name = star ? decodeURIComponent(star[1]) : (plain ? plain[1] : "line.wav");
+
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement("a");
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+  stage("saved " + name, res.headers.get("X-From-Cache") === "1");
+}
+window.renderDownload = renderDownload;
 
 async function saveLine(slot){
   const box = $("#celltext");
