@@ -108,6 +108,19 @@ const S = {
   // What the person asked for before they were sent to choose a voice. Carried across the
   // chooser and the card so the original press is the only press.
   pending: null,
+  /*
+    THE LAST VOICE, REMEMBERED.
+
+    Asking is right when there is nothing to go on and wrong the second time: a set of thirty
+    lines is normally thirty lines in ONE voice, and being asked for each of them turns a
+    three-press job into ninety. The answer to "which voice" after the first cell is almost
+    always "the same one".
+
+    It is a DEFAULT and not a lock. Every cell still keeps its own voice, the card still changes
+    it, and the cell page says which one is about to be used with a button beside it — so it is
+    never a surprise and never something to hunt for.
+  */
+  lastVoice: JSON.parse(localStorage.lastVoice || "null"),
 };
 const $ = s => document.querySelector(s);
 const api = (p, o) => fetch(p + (p.includes("?") ? "&" : "?") + "project=" + S.project, o);
@@ -338,14 +351,15 @@ function press(i){
 
 async function speakThenPlay(i){
   const c = S.cells[i];
-  if (!c.voice){
+  const v = voiceFor(c);
+  if (!v){
     stage("cell " + (i+1) + " has a line but no voice yet — pick one");
     return openCell(i);
   }
   S.working.add(i);
   draw();
   try {
-    await speakCell(i, c.voice, c.voiceId, null, c.voice);
+    await speakCell(i, v.engine, v.engine + "/" + v.id, v.model, v.id, v.name);
   } finally {
     S.working.delete(i);
     draw();
@@ -660,7 +674,11 @@ async function openCell(i){
        <button style="flex:1" onclick="renderDownload('${c.voice || ""}','${c.voiceId ? c.voiceId.split("/")[1] : ""}','',this,${i})">⤓ Download</button>
        <button style="flex:1" onclick="transcribe(${i})">Transcribe</button>
        <button style="flex:1" onclick="readText(${i})">Open a file</button></div>
-     <div class="row" style="margin-top:6px">
+     <div style="color:var(--dim);font-size:10px;margin-top:10px">
+       ${(() => { const v = voiceFor(c); return v
+         ? "voice: " + escapeHtml(v.name) + (c.voice ? " (this cell's)" : " (the last one you used)")
+         : "no voice chosen yet"; })()}</div>
+     <div class="row" style="margin-top:4px">
        <button style="flex:1" onclick="chooser(${i},'speechify')">Speechify</button>
        <button style="flex:1" onclick="chooser(${i},'hume')">Hume</button></div>
      <div class="row" style="margin-top:6px">
@@ -912,12 +930,13 @@ async function performText(i){
   if (!d.ok) return stage(d.why);
   await refresh();
   const c = S.cells[i];
-  if (!c.voice){
+  const v = voiceFor(c);
+  if (!v){
     stage(d.chars + " characters. Now pick Speechify or Hume to perform it.");
     openCell(i);
     return;
   }
-  await speakCell(i, c.voice, c.voiceId, null, c.voice);
+  await speakCell(i, v.engine, v.engine + "/" + v.id, v.model, v.id, v.name);
   openCell(i);
 }
 window.performText = performText;
@@ -1336,6 +1355,10 @@ function card(slot, engine, id){
      after hearing it costs nothing. The file is named after the line with the voice after it,
      because three versions of one sentence in three voices are otherwise three files with the
      same name.
+     <b>The voice</b>A cell uses its own voice if one has been chosen for it, and otherwise the
+     last voice you used anywhere — because a set of thirty lines is normally thirty lines in one
+     voice, and being asked each time turns a three-press job into ninety. It is a default and not
+     a lock: the line above says which one is about to be used, and either button changes it.
      <b>The emotions</b>They insert a tag at the cursor rather than setting a mode. Everything
      after &lt;angry&gt; is read that way until the next tag, so one line can turn on a word. Hume
      receives the pieces as one request and joins them itself, which is why there is no click at
@@ -1449,11 +1472,20 @@ async function renderDownload(engine, id, direction, btn, slot){
     ago. The person presses Download once.
   */
   if (!engine || !id){
-    const at = (slot === undefined || slot === null) ? S.slot : slot;
-    if (at === undefined || at === null) return stage("no cell to work on");
-    await saveLine(at);
-    S.pending = {action: "download", slot: at};
-    return pickEngine(at, "to read that line");
+    // THE REMEMBERED VOICE FIRST, AND ONLY THEN THE QUESTION. Asking every time is what makes a
+    // thirty-line set a ninety-press job.
+    const remembered = S.lastVoice;
+    if (remembered && remembered.engine && remembered.id){
+      engine = remembered.engine;
+      id = remembered.id;
+      stage("using " + remembered.name + " — change it on the cell page");
+    } else {
+      const at = (slot === undefined || slot === null) ? S.slot : slot;
+      if (at === undefined || at === null) return stage("no cell to work on");
+      await saveLine(at);
+      S.pending = {action: "download", slot: at};
+      return pickEngine(at, "to read that line");
+    }
   }
   const v = (S.voices || []).find(x => x.engine === engine && x.id === id);
 
@@ -1490,6 +1522,7 @@ async function renderDownload(engine, id, direction, btn, slot){
   const plain = /filename="([^"]+)"/.exec(cd);
   const name = star ? decodeURIComponent(star[1]) : (plain ? plain[1] : "line.wav");
 
+  rememberVoice(engine, id);
   const url = URL.createObjectURL(await res.blob());
   const a = document.createElement("a");
   a.href = url; a.download = name;
@@ -1523,6 +1556,23 @@ window.saveLine = saveLine;
   Called when a voice has just been chosen. If the person pressed Download before they had one,
   this is where that press lands — not as a second thing to do, but as the same one arriving late.
 */
+/* Set the moment a voice is actually USED for something, never merely auditioned: hearing a
+   voice is browsing, and browsing should not change what the next cell is spoken in. */
+function rememberVoice(engine, id){
+  const v = (S.voices || []).find(x => x.engine === engine && x.id === id);
+  S.lastVoice = {engine, id, name: (v && v.name) || engine, model: (v && v.model) || ""};
+  localStorage.lastVoice = JSON.stringify(S.lastVoice);
+}
+window.rememberVoice = rememberVoice;
+
+/** The voice a cell will use: its own, then the remembered one, then nothing. */
+function voiceFor(c){
+  if (c && c.voice && c.voiceId){
+    return {engine: c.voice, id: c.voiceId.split("/")[1] || "", name: c.voice, model: ""};
+  }
+  return S.lastVoice || null;
+}
+
 async function resumePending(engine, id, btn){
   const p = S.pending;
   if (!p) return false;
@@ -1599,6 +1649,7 @@ async function use(slot, engine, id){
     visible, and the status line underneath saying what is being made. When it lands, the waveform
     appears where the eye already is.
   */
+  rememberVoice(engine, id);
   closeScreen();
   await speakCell(slot, engine, key(v), v.model, id, v.name);
 }
