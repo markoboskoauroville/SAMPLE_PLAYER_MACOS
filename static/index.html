@@ -102,6 +102,9 @@ const S = {
   page: 0,
   playMode: "continuous",
   voices: [], engine: null, direction: "", stars: new Set(JSON.parse(localStorage.stars||"[]")),
+  // Which cells are generating right now. A set rather than a single value: nothing stops two
+  // being asked for at once, and a single value would leave the first one spinning for ever.
+  working: new Set(),
 };
 const $ = s => document.querySelector(s);
 const api = (p, o) => fetch(p + (p.includes("?") ? "&" : "?") + "project=" + S.project, o);
@@ -126,11 +129,19 @@ function stage(t, cached){
     (cached ? ` <span class="from-cache">— from cache, nothing spent</span>` : "") + `</span>`;
 }
 
+/* One frame, shared by the status line, the cells and any button that borrows it — so everything
+   spinning on the screen turns together rather than each at its own phase. */
+function spinFrame(){ return SPIN[spinAt % SPIN.length]; }
+
 function spinStart(){
   if (spinTimer) return;
   spinTimer = setInterval(() => {
+    spinAt++;
     const el = $("#spin");
-    if (el) el.textContent = SPIN[spinAt++ % SPIN.length];
+    if (el) el.textContent = spinFrame();
+    // Cells and buttons that are working turn on the same tick.
+    if (S.working.size) repaint();
+    document.querySelectorAll("[data-spin]").forEach(b => { b.textContent = spinFrame(); });
   }, 90);
 }
 function spinStop(){
@@ -227,8 +238,30 @@ function paint(cv, c, i){
     x.fillRect(scope.at * bw, 0, Math.max(1, bw), h);
     return;
   }
+  // THE SPINNER IN THE MIDDLE OF THE CELL. The status line says what is happening; this says
+  // WHERE. Waiting twelve seconds for Hume with a spinner at the bottom of the window and nothing
+  // on the cell is watching the wrong part of the screen.
+  if (S.working.has(i)){
+    x.fillStyle = getVar("--amber");
+    x.font = Math.round(h * 0.5) + "px ui-monospace, monospace";
+    x.textAlign = "center";
+    x.textBaseline = "middle";
+    x.fillText(spinFrame(), w / 2, h / 2);
+    return;
+  }
   const wf = c.waveform || [];
-  if (!wf.length) return;
+  if (!wf.length){
+    // A LINE WITH NO AUDIO IS NOT A BLANK CELL EITHER. It says so, so the difference between
+    // "nothing here" and "not spoken yet" is visible on the grid rather than only on the card.
+    if ((c.words || "").trim()){
+      x.fillStyle = getVar("--dim");
+      x.font = Math.round(h * 0.28) + "px ui-monospace, monospace";
+      x.textAlign = "center";
+      x.textBaseline = "middle";
+      x.fillText("not spoken yet", w / 2, h / 2);
+    }
+    return;
+  }
   x.fillStyle = getVar("--wave");
   const bw = w / wf.length;
   wf.forEach((v,k) => { const bh = Math.max(1, v*h); x.fillRect(k*bw, (h-bh)/2, Math.max(1,bw), bh); });
@@ -263,29 +296,73 @@ function repaint(){
 /* One gesture, two meanings, and the mode is the only thing between a seek and an overwrite.
    Recording over a cell that already holds something asks first — and offers Play, because
    the usual reason a full cell is pressed in record mode is that the mode was forgotten. */
+/*
+  A CELL WITH ONLY A LINE IN IT IS NOT AN EMPTY CELL.
+
+  THE BUG THIS FIXES: hasAudio asked whether there was a FILE, and a cell that had been given a
+  line — typed, pasted, or opened from a text file — has no file until a voice has spoken it. So
+  in record mode clicking one recorded straight over the line without asking, and in play mode it
+  said "nothing in cell 2" while the words were sitting on the screen.
+
+  A cell holds CONTENT if it has audio or a line. Everything about losing work asks that. Only the
+  question of what to PLAY asks whether a file exists yet, and the answer when it does not is to
+  make it rather than to refuse.
+*/
+function hasContent(c){
+  return !!c && (c.hasAudio || (c.words || "").trim().length > 0);
+}
+
 function press(i){
   const c = S.cells[i];
   if (S.mode === "rec"){
     if (S.recording === i) return stopRecording();
     if (S.recording !== null) return stage("cell " + (S.recording+1) + " is recording");
-    if (c && c.hasAudio) return confirmBar(i);
+    // Asks about a line as well as about a take. The line came from somewhere — a file, a paste,
+    // a transcription — and recording over it destroys it with nothing said.
+    if (hasContent(c)) return confirmBar(i);
     startRecording(i);
   } else {
-    if (!c || !c.hasAudio) return stage("nothing in cell " + (i+1));
-    if (c.loop) return toggleLoop(i);
-    play(i);
+    if (!hasContent(c)) return stage("nothing in cell " + (i+1));
+    if (c.hasAudio){
+      if (c.loop) return toggleLoop(i);
+      return play(i);
+    }
+    // A LINE WITH NO AUDIO YET: make it, then play it. Clicking a cell that has words in it and
+    // being told there is nothing there is the app refusing to do the one obvious next thing.
+    return speakThenPlay(i);
   }
+}
+
+async function speakThenPlay(i){
+  const c = S.cells[i];
+  if (!c.voice){
+    stage("cell " + (i+1) + " has a line but no voice yet — pick one");
+    return openCell(i);
+  }
+  S.working.add(i);
+  draw();
+  try {
+    await speakCell(i, c.voice, c.voiceId, null, c.voice);
+  } finally {
+    S.working.delete(i);
+    draw();
+  }
+  if (S.cells[i] && S.cells[i].hasAudio) play(i);
 }
 
 function confirmBar(i){
   $("#bar").innerHTML = "";
   const q = document.createElement("div");
   q.style.cssText = "border:1px solid var(--red);padding:8px;flex:1";
-  q.innerHTML = `<div>Cell ${i+1} already has a take. Play it, or record over it?</div>`;
+  const c = S.cells[i];
+  const what = c.hasAudio ? "already has a take" : "already has a line in it";
+  q.innerHTML = `<div>Cell ${i+1} ${what}. Play it, or record over it?</div>`;
   const r = document.createElement("div"); r.className = "row"; r.style.marginTop = "8px";
   r.append(
     mk("Cancel", () => draw()),
-    mk("Play", () => { S.mode = "play"; play(i); draw(); }, "var(--amber)"),
+    // Play does what the press would have done in the other mode, whichever kind of cell it is —
+    // which is why it can be offered rather than being a fourth behaviour invented for the bar.
+    mk("Play", () => { S.mode = "play"; press(i); draw(); }, "var(--amber)"),
     mk("OK", () => { startRecording(i); }, "var(--red)"),
   );
   q.appendChild(r); $("#bar").appendChild(q);
@@ -577,7 +654,7 @@ async function openCell(i){
      <div class="row" style="margin-top:6px">
        <button style="flex:2;background:var(--amber);color:#000"
                onclick="performText(${i})">Perform this text</button>
-       <button style="flex:1" onclick="renderDownload('${c.voice || ""}','${c.voiceId ? c.voiceId.split("/")[1] : ""}','')">⤓ Download</button>
+       <button style="flex:1" onclick="renderDownload('${c.voice || ""}','${c.voiceId ? c.voiceId.split("/")[1] : ""}','',this)">⤓ Download</button>
        <button style="flex:1" onclick="transcribe(${i})">Transcribe</button>
        <button style="flex:1" onclick="readText(${i})">Open a file</button></div>
      <div class="row" style="margin-top:6px">
@@ -1197,7 +1274,7 @@ function card(slot, engine, id){
      <div class="row" style="margin:6px 0">
        <button style="flex:1" onclick="saveLine(${slot})">Save the line</button>
        <button style="flex:1" onclick="hearLine(${slot},'${engine}','${id}')">Hear the line</button>
-       <button style="flex:1" onclick="renderDownload('${engine}','${id}','')">⤓ Download</button>
+       <button style="flex:1" onclick="renderDownload('${engine}','${id}','',this)">⤓ Download</button>
        <button style="flex:1;background:var(--amber);color:#000"
                onclick="use(${slot},'${engine}','${id}')">Use this voice</button></div>
 
@@ -1319,13 +1396,28 @@ window.dropEmotion = dropEmotion;
 
   It goes through the same cache as the audition, so pressing this after hearing it costs nothing.
 */
-async function renderDownload(engine, id, direction){
+async function renderDownload(engine, id, direction, btn){
   const box = $("#celltext");
   const line = box ? box.value.trim() : "";
   if (!line) return stage("nothing in the box to render");
   if (!engine || !id) return stage("pick a voice first");
   const v = (S.voices || []).find(x => x.engine === engine && x.id === id);
 
+  /*
+    THE BUTTON ITSELF SPINS.
+
+    Rendering a line that has never been spoken is a real call — a second on Speechify, twelve on
+    Hume — and the button that was pressed is where the eye is. The status line says what is
+    happening and the button says that THIS is the thing doing it.
+
+    data-spin rather than a timer per button: the one interval that already turns the status line
+    turns every marked element on the same tick, so nothing on screen is out of phase with
+    anything else, and a button removed mid-render takes its spinner with it.
+  */
+  const was = btn ? btn.textContent : null;
+  if (btn){ btn.dataset.spin = "1"; btn.disabled = true; }
+
+  try {
   const res = await busy("rendering the line…", () =>
     fetch("/api/render", {method: "POST", headers: {"Content-Type": "application/json"},
       body: JSON.stringify({engine, voiceId: id, model: (v && v.model) || "",
@@ -1350,6 +1442,11 @@ async function renderDownload(engine, id, direction){
   document.body.appendChild(a); a.click(); a.remove();
   URL.revokeObjectURL(url);
   stage("saved " + name, res.headers.get("X-From-Cache") === "1");
+  } finally {
+    // In a finally, so a failed render gives the button back rather than leaving it spinning on a
+    // screen where nothing is happening.
+    if (btn){ delete btn.dataset.spin; btn.disabled = false; btn.textContent = was; }
+  }
 }
 window.renderDownload = renderDownload;
 
