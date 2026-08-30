@@ -1676,6 +1676,7 @@ async function speakCell(slot, engine, storedKey, model, voiceId, name){
 async function settings(){
   const k = await (await fetch("/api/keys")).json();
   setTimeout(showCache, 0);
+  setTimeout(checkVersion, 0);
   screen("Settings   " + (window.VERSION || ""),
     `<div style="color:var(--label)">CELLS</div>
      <div class="row"><button onclick="setCount(-10)">−10</button>
@@ -1700,6 +1701,10 @@ async function settings(){
        ).join("\n") : "none yet"}</div>
      <div style="height:6px"></div>
      <button style="width:100%" onclick="importKeys()">Import keys from a file</button>
+     <div style="color:var(--label);margin-top:10px">VERSION</div>
+     <div id="versionstate" style="font-size:10px;color:var(--dim)">checking…</div>
+     <div class="row" style="margin-top:6px">
+       <button style="flex:1" onclick="checkVersion()">Check for updates</button></div>
      <div style="color:var(--label);margin-top:10px">CACHE</div>
      <div id="cachestate" style="font-size:10px;color:var(--dim)">reading…</div>
      <div class="row" style="margin-top:6px">
@@ -1711,6 +1716,12 @@ async function settings(){
      <b>Waveform detail</b>How finely each cell draws its shape. Higher is slower to open a page.
      <b>When a sample ends</b>Continuous plays on down the set. Single plays the cell you pressed
      and stops.
+     <b>Check for updates</b>Compares what is installed against the installer at the head of the
+     repository — the same file the update runs, so the two cannot disagree about what newest
+     means. It reports and does not act: a button here that replaced the server would be replacing
+     the process serving the page that holds the button. Press <b>u</b> in the terminal panel,
+     which fetches, checks everything before touching anything, installs, and restarts as the new
+     version.
      <b>Cache</b>Catalogues are fetched once and kept for a month; a voice list is seven round
      trips to receive something that changes a few times a year. Every generated sound is kept
      too, filed under the voice, the words and the direction — so going back to a voice you have
@@ -1764,6 +1775,36 @@ window.clearCache = clearCache;
   that appears for one frame is noise, and announcing work that is not happening is the same lie
   the spinner exists to prevent, told in the other direction.
 */
+/*
+  WHAT IS INSTALLED AND WHAT IS PUBLISHED.
+
+  IT REPORTS AND DOES NOT ACT, and that is the whole design. A button here that updated the app
+  would replace the server underneath the page displaying the button — the page would be talking
+  to a process that had already been killed, and whatever it said next would be a guess.
+
+  Updating is `u` in the terminal panel, because the process that has to be replaced is the one
+  being looked at there. So this says what it found and where to press.
+*/
+async function checkVersion(){
+  const el = $("#versionstate");
+  const d = await busy("asking GitHub…", async () =>
+    (await fetch("/api/version")).json());
+  if (!el) return;
+  if (d.why){
+    el.textContent = d.installed + " installed — " + d.why;
+    return stage(d.why);
+  }
+  if (d.behind){
+    el.innerHTML = `<span style="color:var(--amber)">${d.installed} installed, ${d.latest}
+      published — press <b>u</b> in the terminal to update and restart</span>`;
+    stage(d.latest + " is out");
+  } else {
+    el.textContent = d.installed + " installed — this is the newest";
+    stage("up to date");
+  }
+}
+window.checkVersion = checkVersion;
+
 async function showCache(){
   const c = await (await fetch("/api/cache")).json();
   const el = $("#cachestate");

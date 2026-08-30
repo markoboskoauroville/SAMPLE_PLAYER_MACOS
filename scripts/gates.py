@@ -90,6 +90,14 @@ print()
 print("G1 · PROVENANCE")
 ed = re.search(r"edition: (v[\d.]+)", installer_src)
 check("G1", "the installer states an edition", bool(ed), ed.group(1) if ed else "none found")
+# TWO NUMBERS THAT MUST AGREE IS A LIE WAITING TO HAPPEN, so the gate compares them rather than
+# trusting anybody to remember. The page reports the server's constant and the update runs the
+# installer, so a mismatch would have the app claiming a version it is not.
+server_ed = re.search(r'EDITION = "(v[\d.]+)"', server_src)
+check("G1", "the server and the installer agree on the edition",
+      bool(server_ed) and bool(ed) and server_ed.group(1) == ed.group(1),
+      "server %s, installer %s" % (server_ed.group(1) if server_ed else "none",
+                                   ed.group(1) if ed else "none"))
 check("G1", "the updater points at this repository",
       "SAMPLE_PLAYER_MACOS/main" in updater_src,
       "raw.githubusercontent path present")

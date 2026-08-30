@@ -59,6 +59,13 @@ MAX_GAIN = 10.0        # 20 dB. Past this a quiet room becomes a convincing wall
 MIN_SPEECH_MS = 250
 MAX_TEXT = 2000
 
+# THE VERSION THIS FILE IS. Bumped by hand in the same edit that bumps the installer, and checked
+# against it by G1 — two numbers that must agree is a lie waiting to happen, so the gate compares
+# them rather than trusting anybody to remember.
+EDITION = "v2.5"
+
+RAW = "https://raw.githubusercontent.com/markoboskoauroville/SAMPLE_PLAYER_MACOS/main"
+
 CACHE = os.path.join(APPDIR, "cache")
 VOICE_CACHE = os.path.join(CACHE, "audio")
 CATALOGUE_TTL = 30 * 24 * 3600   # a month, and there is a button for the impatient
@@ -1051,6 +1058,38 @@ def voices(engine):
         os.replace(tmp, path)
     payload["cached"] = False
     return jsonify(payload)
+
+
+@app.route("/api/version")
+def version():
+    """
+    WHAT IS INSTALLED, AND WHAT IS PUBLISHED.
+
+    Asked for rather than assumed: the answer comes from the installer at the head of the
+    repository, which is the same file `u` would run, so the two can never disagree about what
+    "newest" means.
+
+    IT REPORTS AND DOES NOT ACT. A page that updates itself would be a page that restarts the
+    server underneath the person reading it. Updating is `u` in the terminal panel, where the
+    process that has to be replaced is the one being looked at.
+    """
+    code, body = http("GET", RAW + "/3sh_i_sample_player_v1_macos.sh", {}, None, timeout=20)
+    if code != 200:
+        return jsonify({"installed": EDITION, "latest": None,
+                        "why": "could not reach GitHub: " + explain(code, body)})
+    m = re.search(r"edition: (v[\d.]+)", body.decode("utf-8", "replace"))
+    latest = m.group(1) if m else None
+
+    def parts(v):
+        return [int(x) for x in re.findall(r"\d+", v or "")]
+
+    behind = bool(latest) and parts(latest) > parts(EDITION)
+    return jsonify({
+        "installed": EDITION,
+        "latest": latest,
+        "behind": behind,
+        "why": "" if latest else "the published installer has no edition line",
+    })
 
 
 @app.route("/api/cache")
