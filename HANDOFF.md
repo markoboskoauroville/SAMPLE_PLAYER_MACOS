@@ -61,8 +61,18 @@ One toggle bottom right. Recording over a cell that already holds something asks
     space         stop this cell, start the next
     m             swap REC and PLAY
     left / right  flip the page
+    i / o         mark the in and out points, on the cell page
     esc           stop everything
     right-click   a cell's menu
+
+In the terminal panel, while the server runs:
+
+    o / a         open it in Chrome, or in the default browser
+    f             the data folder in Finder
+    l             the last of the log
+    r             refresh the panel
+    u             update and restart
+    q             stop the server
 
 ## AUDIO
 

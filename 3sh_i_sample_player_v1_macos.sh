@@ -1,6 +1,6 @@
 #!/bin/bash
 # ---------------------------------------------------------------------------
-# SAMPLE PLAYER — installer for macOS                        edition: v1.7
+# SAMPLE PLAYER — installer for macOS                        edition: v1.8
 #
 # repo: SAMPLE_PLAYER_MACOS
 #
@@ -315,13 +315,59 @@ show_head(){
     "$KEYC" "$OFFC" "$KEYC" "$OFFC"
   printf '    %sa%s  open in the default one  %sl%s  the last of the log\n' \
     "$KEYC" "$OFFC" "$KEYC" "$OFFC"
-  printf '    %sf%s  the data folder in Finder %sq%s  stop the server\n' \
+  printf '    %sf%s  the data folder in Finder %su%s  update and restart\n' \
     "$KEYC" "$OFFC" "$KEYC" "$OFFC"
+  printf '    %sq%s  stop the server\n' "$KEYC" "$OFFC"
   ruleC
   printf '\n'
 }
 
 open_url(){ open -a "Google Chrome" "$1" >/dev/null 2>&1 || open "$1" >/dev/null 2>&1; }
+
+# UPDATE FROM THE PANEL, then come back as the new version.
+#
+# Typing sampleplayer-update means quitting this, remembering the other word, and starting again —
+# three steps to do the thing the panel is already open for.
+#
+# THE SERVER IS STOPPED FIRST. The installer copies server.py into place, and replacing a file a
+# running python is importing from is how you get a process holding half of one version and half
+# of another.
+#
+# THEN exec RATHER THAN A RETURN. The installer also rewrites this very script. It writes .new and
+# moves it, so the shell reading the old inode is safe to finish the line it is on — but the code
+# after this point would be the OLD launcher starting the NEW server, and the panel would then be
+# describing a version it is not. exec replaces this process with the freshly installed one, so
+# what comes back is entirely new: new launcher, new server, new page.
+#
+# The traps do not fire across an exec, so caffeinate and the tty are dealt with here by hand.
+do_update(){
+  tty_restore
+  printf '\n   %supdating%s\n\n' "$AMBC" "$OFFC"
+  [ -n "$SRV" ]  && kill "$SRV"  2>/dev/null
+  [ -n "$CAFF" ] && kill "$CAFF" 2>/dev/null
+  wait "$SRV" 2>/dev/null
+
+  if command -v sampleplayer-update >/dev/null 2>&1; then
+    sampleplayer-update
+  else
+    # Installed straight from a clone, so there is no update command yet. Fetch the fetcher.
+    T="$(mktemp -d)"
+    if curl -fsSL --retry 3 -o "$T/update.sh" \
+        "https://raw.githubusercontent.com/markoboskoauroville/SAMPLE_PLAYER_MACOS/main/update.sh" \
+        && bash -n "$T/update.sh"; then
+      bash "$T/update.sh"
+    else
+      printf '   %scould not fetch the updater. Nothing was changed.%s\n' "$REDC" "$OFFC"
+    fi
+    rm -rf "$T"
+  fi
+
+  # Whether the update succeeded or refused, what is installed now is what should run. A failed
+  # update leaves the previous version in place untouched, so this restarts that.
+  printf '\n   %srestarting%s\n' "$DIMC" "$OFFC"
+  sleep 1
+  exec "$HOME/.local/bin/sampleplayer"
+}
 
 # CHROME BY PREFERENCE. Safari asks for the microphone once per page load and
 # forgets; Chrome remembers the grant for 127.0.0.1, which matters in an app
@@ -340,6 +386,7 @@ if [ -t 0 ]; then
         f|F) open "$APPDIR/data" >/dev/null 2>&1 ;;
         l|L) printf '\n'; tail -n 15 "$LOG" 2>/dev/null | sed 's/^/     /'; printf '\n' ;;
         r|R) show_head ;;
+        u|U) do_update ;;
         q|Q) break ;;
       esac
     fi
