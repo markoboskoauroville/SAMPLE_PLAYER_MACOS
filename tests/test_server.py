@@ -331,6 +331,83 @@ class Text(unittest.TestCase):
         self.assertEqual(len(S.clean_text("x" * 5000)), S.MAX_TEXT)
 
 
+class Tags(unittest.TestCase):
+    """
+    Inline emotion tags. A line that begins calm and turns furious halfway is the ordinary case,
+    and a single direction for a whole utterance cannot express it.
+    """
+
+    def test_a_line_with_no_tags_is_one_piece_with_no_direction(self):
+        self.assertEqual(S.segment("Danas je lijep dan."), [("Danas je lijep dan.", "")])
+
+    def test_a_tag_directs_everything_after_it(self):
+        out = S.segment("quietly <angry> and then not")
+        self.assertEqual(len(out), 2)
+        self.assertEqual(out[0][0], "quietly")
+        self.assertEqual(out[0][1], "")
+        self.assertEqual(out[1][0], "and then not")
+        self.assertIn("angry", out[1][1])
+
+    def test_text_before_the_first_tag_keeps_no_direction(self):
+        # Inheriting backwards would make a line angry from the start when it turns angry halfway.
+        out = S.segment("plain <furious> loud")
+        self.assertEqual(out[0][1], "")
+
+    def test_several_tags_give_several_pieces(self):
+        out = S.segment("<calm> one <angry> two <sad> three")
+        self.assertEqual([p[0] for p in out], ["one", "two", "three"])
+        self.assertEqual(len({p[1] for p in out}), 3)
+
+    def test_a_tag_at_the_very_start_directs_the_whole_line(self):
+        out = S.segment("<whispered> all of it")
+        self.assertEqual(len(out), 1)
+        self.assertIn("whisper", out[0][1])
+
+    def test_an_unknown_tag_is_left_in_the_text_rather_than_swallowed(self):
+        # More likely a misspelling than an instruction, and a voice reading it aloud is a bug you
+        # can see, where dropping it silently is one you cannot.
+        out = S.segment("hello <notanemotion> world")
+        self.assertEqual(len(out), 1)
+        self.assertIn("notanemotion", out[0][0])
+
+    def test_empty_pieces_are_not_sent(self):
+        out = S.segment("<angry><sad> only this")
+        self.assertEqual([p[0] for p in out], ["only this"])
+
+    def test_strip_tags_removes_the_known_ones_only(self):
+        self.assertEqual(S.strip_tags("a <angry> b"), "a b")
+        self.assertEqual(S.strip_tags("a <notanemotion> b"), "a <notanemotion> b")
+
+    def test_strip_tags_leaves_one_space_where_a_tag_was(self):
+        self.assertEqual(S.strip_tags("<calm>   spaced   out  "), "spaced out")
+
+    def test_tags_are_case_blind(self):
+        self.assertEqual(len(S.segment("a <ANGRY> b")), 2)
+
+
+class Emotions(unittest.TestCase):
+    def test_the_built_in_set_is_a_real_starting_point(self):
+        self.assertGreaterEqual(len(S.BUILT_IN_EMOTIONS), 20)
+
+    def test_every_built_in_has_a_name_a_glyph_and_prose(self):
+        for e in S.BUILT_IN_EMOTIONS:
+            self.assertTrue(e["label"] and e["label"] == e["label"].lower())
+            self.assertEqual(len(e["glyph"]), 1)
+            self.assertGreater(len(e["text"]), 8)
+
+    def test_no_two_share_a_name_or_a_glyph(self):
+        labels = [e["label"] for e in S.BUILT_IN_EMOTIONS]
+        glyphs = [e["glyph"] for e in S.BUILT_IN_EMOTIONS]
+        self.assertEqual(len(labels), len(set(labels)))
+        self.assertEqual(len(glyphs), len(set(glyphs)))
+
+    def test_a_label_can_be_written_as_a_tag(self):
+        # It becomes <label> inside the line, so it cannot contain the brackets that delimit it.
+        for e in S.BUILT_IN_EMOTIONS:
+            self.assertNotIn("<", e["label"])
+            self.assertNotIn(">", e["label"])
+
+
 class Slug(unittest.TestCase):
     """A download named after what it says, because thirty cell-NN files cannot be told apart."""
 

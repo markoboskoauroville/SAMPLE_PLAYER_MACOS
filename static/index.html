@@ -1159,34 +1159,162 @@ const EMOTIONS = [
   ["Storytelling","❦","telling a story to a child, colours in the voice","is telling a story"],
 ];
 
+/*
+  THE SAME LINE, ON WHICHEVER SCREEN YOU ARE STANDING.
+
+  The cell page has the text box and the card did not, so choosing a voice meant closing the card,
+  editing the line, and opening the card again to hear it. It is one box in two places now — both
+  write to the same cell through the same route, so a correction made while auditioning is the
+  correction the cell keeps.
+
+  THE EMOTIONS INSERT A TAG RATHER THAN SETTING A MODE. A single direction applies to a whole
+  utterance, which is the one thing an actor is not for: a line that begins calm and turns furious
+  halfway is the ordinary case, not the exotic one. Pressing an emotion writes <angry> at the
+  cursor, and everything after it is read that way until the next tag.
+
+  Hume takes a list of utterances in ONE request and joins them itself, so a line that turns
+  emotion three times is one call and one seamless piece of audio — not three files stitched
+  together with a click at each join.
+*/
 function card(slot, engine, id){
   const v = S.voices.find(x => x.engine===engine && x.id===id);
   const star = S.stars.has(key(v));
+  const words = (S.cells[slot] && S.cells[slot].words) || "";
   screen(escapeHtml(v.name),
     `<div style="font-size:20px" class="${(v.gender||"").toLowerCase()}">${escapeHtml(v.name)}
        <span onclick="star('${key(v)}')" style="cursor:pointer">${star?"★":"☆"}</span></div>
      <div style="color:var(--dim)">${engine}${v.flagship?" · ✦ flagship":""}</div>
-     <div class="row" style="margin:10px 0">
-       <button style="flex:1" onclick="hear(${slot},'${engine}','${id}')">Hear it</button>
+
+     <textarea id="celltext" rows="4"
+       placeholder="the line this voice will read — type it, or press an emotion to tag it"
+       style="width:100%;margin-top:10px;background:#000;border:1px solid #52525b;color:#fff;
+              font:inherit;padding:6px;resize:vertical">${escapeHtml(words)}</textarea>
+
+     <div class="row" style="margin:6px 0">
+       <button style="flex:1" onclick="saveLine(${slot})">Save the line</button>
+       <button style="flex:1" onclick="hearLine(${slot},'${engine}','${id}')">Hear the line</button>
        <button style="flex:1;background:var(--amber);color:#000"
                onclick="use(${slot},'${engine}','${id}')">Use this voice</button></div>
-     <div style="color:var(--label);font-size:10px;white-space:pre-line">${
+
+     <div style="color:var(--label);font-size:10px;white-space:pre-line;margin-top:8px">${
        [["gender",v.gender],["age",v.age],["language",v.language],["accent",v.accent],
         ["id",v.id],["model",v.model]].filter(r=>r[1]).map(r=>r[0].padEnd(9)+r[1]).join("\n")
      }\n${(v.tags||[]).join("  ")}</div>` +
-    (engine === "hume" ? `<div style="margin-top:14px;color:var(--label)">HOW IT SAYS IT</div>
-       <div id="emo">${EMOTIONS.map((e,k)=>
-         `<span class="chip" onclick="emo(${slot},'${engine}','${id}',${k})">${e[1]} ${e[0]}</span>`
-       ).join("")}</div>` : ""),
-    `<b>Hear it</b>The voice says its own name. Short on purpose: ten auditions on a long line
-     is ten long waits and ten times the billed characters.
-     <b>Use this voice</b>Speaks this cell's text and stores it BESIDE your recording. Your take
-     is never replaced.
-     <b>How it says it</b>Hume reads the direction as prose rather than matching a list, so these
-     are starting points. Tapping one previews it: the voice says its own name and what it is
-     doing. Speechify has no such field, so this only appears for Hume.`);
+    (engine === "hume" ? `
+       <div style="margin-top:14px;color:var(--label)">HOW IT SAYS IT — press to tag the line</div>
+       <div id="emo" style="margin-top:4px"></div>
+       <div class="row" style="margin-top:8px">
+         <input id="newlabel" type="text" placeholder="my own name for it" style="flex:1">
+         <input id="newtext" type="text" placeholder="how it should be delivered" style="flex:2">
+         <button style="flex:0 0 auto" onclick="addEmotion()">＋ add</button></div>`
+     : `<div style="margin-top:14px;color:var(--dim);font-size:10px">
+         Speechify has no direction field, so emotion tags are removed before it reads the line
+         rather than pronounced aloud. Hume reads them.</div>`),
+    `<b>The line</b>The same text as on the cell page. Editing it here changes the cell, so a
+     correction made while auditioning is the one that is kept.
+     <b>Hear the line</b>Reads exactly what is in the box, tags and all, in this voice. Cached
+     under the voice and the words, so hearing it twice costs nothing the second time.
+     <b>The emotions</b>They insert a tag at the cursor rather than setting a mode. Everything
+     after &lt;angry&gt; is read that way until the next tag, so one line can turn on a word. Hume
+     receives the pieces as one request and joins them itself, which is why there is no click at
+     the join.
+     <b>＋ add</b>Your own directions, kept for every voice rather than for this one. An emotion is
+     a note about a DELIVERY, and a note that only works on one actor out of eleven hundred is a
+     note nobody reuses. Hume reads the description as prose, so write it the way you would say it
+     to a person.
+     <b>Use this voice</b>Speaks the line into the cell and stores it beside your recording. If
+     the cell has no transcript yet it transcribes first. Your take is never replaced.`);
+  renderEmotions();
 }
 window.card = card;
+
+/* Built-in and custom together, fetched once and kept, because a palette that reloads on every
+   card is a palette that flickers. */
+async function loadEmotions(force){
+  if (S.emotions && !force) return S.emotions;
+  const d = await (await fetch("/api/emotions")).json();
+  S.emotions = d.emotions || [];
+  return S.emotions;
+}
+
+async function renderEmotions(){
+  const el = $("#emo");
+  if (!el) return;
+  const list = await loadEmotions();
+  el.innerHTML = list.map(e =>
+    `<span class="chip" title="${escapeHtml(e.text)}" onclick="tag('${e.label}')">${
+      e.glyph || "•"} ${escapeHtml(e.label)}${e.custom ? " ·" : ""}</span>`).join("") +
+    `<div style="color:var(--dim);font-size:9px;margin-top:4px">· is yours. Right-click one of
+     yours to remove it.</div>`;
+  el.querySelectorAll(".chip").forEach((c, i) => {
+    const e = list[i];
+    if (e && e.custom) c.oncontextmenu = ev => { ev.preventDefault(); dropEmotion(e.label); };
+  });
+}
+
+/*
+  INSERTED AT THE CURSOR, NOT APPENDED.
+
+  The point of a tag is where it sits: putting it at the end would make every line one emotion
+  again, which is what this replaces. If nothing is selected it goes where the caret is, and the
+  caret is left after it so a run of tags can be typed without reaching for the mouse.
+*/
+function tag(label){
+  const box = $("#celltext");
+  if (!box) return;
+  const t = "<" + label + "> ";
+  const a = box.selectionStart, b = box.selectionEnd;
+  box.value = box.value.slice(0, a) + t + box.value.slice(b);
+  box.selectionStart = box.selectionEnd = a + t.length;
+  box.focus();
+}
+window.tag = tag;
+
+async function addEmotion(){
+  const label = $("#newlabel").value.trim();
+  const text = $("#newtext").value.trim();
+  if (!label || !text) return stage("an emotion needs a name and a description");
+  const d = await busy("saving the emotion…", async () =>
+    (await fetch("/api/emotions", {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({label, text})})).json());
+  if (!d.ok) return stage(d.why);
+  S.emotions = d.emotions;
+  $("#newlabel").value = ""; $("#newtext").value = "";
+  stage("added — it is on every voice now");
+  renderEmotions();
+}
+window.addEmotion = addEmotion;
+
+async function dropEmotion(label){
+  const d = await busy("removing…", async () =>
+    (await fetch("/api/emotions/" + encodeURIComponent(label), {method:"DELETE"})).json());
+  S.emotions = d.emotions;
+  stage("removed " + label);
+  renderEmotions();
+}
+window.dropEmotion = dropEmotion;
+
+async function saveLine(slot){
+  const box = $("#celltext");
+  if (!box) return;
+  const d = await busy("saving the line…", async () =>
+    (await api("/api/text/" + slot, {method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({text: box.value})})).json());
+  if (!d.ok) return stage(d.why);
+  await refresh();
+  stage(d.chars + " characters saved to cell " + (slot+1));
+}
+window.saveLine = saveLine;
+
+async function hearLine(slot, engine, id){
+  const box = $("#celltext");
+  const line = box ? box.value.trim() : "";
+  if (!line) return stage("nothing in the box to read");
+  await saveLine(slot);
+  await hear(slot, engine, id, line, "");
+}
+window.hearLine = hearLine;
 
 function star(k){
   S.stars.has(k) ? S.stars.delete(k) : S.stars.add(k);

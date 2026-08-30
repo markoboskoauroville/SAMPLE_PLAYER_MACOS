@@ -612,8 +612,11 @@ def speak(engine, voice_id, model, text, direction=""):
     """
     for c in ring(engine):
         if engine == "speechify":
+            # SPEECHIFY HAS NO DIRECTION FIELD, so the tags are stripped rather than read
+            # aloud. Sending them would have a voice pronounce "less-than excited greater-than" in
+            # the middle of a sentence, which is the worst of the three possible behaviours.
             payload = {
-                "input": text, "voice_id": voice_id, "audio_format": "wav",
+                "input": strip_tags(text), "voice_id": voice_id, "audio_format": "wav",
                 "model": model or ("simba-3.2" if voice_id.endswith("_32") else "simba-english"),
             }
             code, body = http(
@@ -623,15 +626,24 @@ def speak(engine, voice_id, model, text, direction=""):
             )
             field = "audio_data"
         else:
-            utt = {"text": text, "voice": {"id": voice_id}}
-            if direction.strip():
-                # Sent only when there is one: an empty description is not neutral, it is a
-                # field asking to be interpreted.
-                utt["description"] = direction
+            # ONE REQUEST, SEVERAL UTTERANCES. Hume takes a list and joins them itself, each with
+            # its own description — so a line that turns from calm to furious halfway is one call
+            # and one seamless piece of audio, not two files stitched together with a click in the
+            # middle. This is the whole reason the tags are worth having.
+            pieces = segment(text)
+            utts = []
+            for spoken, d in pieces:
+                u = {"text": spoken, "voice": {"id": voice_id}}
+                # Sent only when there is one: an empty description is not neutral, it is a field
+                # asking to be interpreted.
+                d = (d or direction).strip()
+                if d:
+                    u["description"] = d
+                utts.append(u)
             code, body = http(
                 "POST", "https://api.hume.ai/v0/tts",
                 {"X-Hume-Api-Key": c["key"], "Content-Type": "application/json"},
-                json.dumps({"utterances": [utt], "format": {"type": "wav"},
+                json.dumps({"utterances": utts, "format": {"type": "wav"},
                             "num_generations": 1}).encode(),
             )
             field = "audio"
@@ -649,6 +661,103 @@ def speak(engine, voice_id, model, text, direction=""):
             continue
         return None, "%s: %s" % (engine, explain(code, body))
     return None, "%s: no account left to try" % engine
+
+
+EMOTIONS_FILE = os.path.join(APPDIR, "emotions.json")
+
+# The ones that ship. Custom ones are added beside them and both are offered everywhere, because
+# an emotion belongs to the DIRECTION and not to the actor: a note that only works on one voice is
+# a note nobody can reuse.
+BUILT_IN_EMOTIONS = [
+    {"label": "neutral", "glyph": "—", "text": "even and unhurried, no particular emotion"},
+    {"label": "happy", "glyph": "☀", "text": "genuinely happy, light and quick"},
+    {"label": "excited", "glyph": "⚡", "text": "excited, can hardly get the words out fast enough"},
+    {"label": "kind", "glyph": "♡", "text": "gentle and kind, unhurried"},
+    {"label": "tender", "glyph": "◡", "text": "tender and low, almost private"},
+    {"label": "sad", "glyph": "▽", "text": "sad and quiet, slowing at the ends of phrases"},
+    {"label": "grieving", "glyph": "☂", "text": "grieving, barely holding the voice together"},
+    {"label": "weary", "glyph": "…", "text": "weary, worn out, no energy left for emphasis"},
+    {"label": "angry", "glyph": "✖", "text": "angry, clipped and hard on the consonants"},
+    {"label": "furious", "glyph": "‼", "text": "furious, barely holding it together"},
+    {"label": "firm", "glyph": "▮", "text": "firm and final, leaving no room to argue"},
+    {"label": "sarcastic", "glyph": "¬", "text": "dry and sarcastic, meaning the opposite"},
+    {"label": "anxious", "glyph": "◌", "text": "anxious, breath high and shallow"},
+    {"label": "afraid", "glyph": "△", "text": "afraid, voice unsteady"},
+    {"label": "urgent", "glyph": "!", "text": "urgent, needs to be understood immediately"},
+    {"label": "whispered", "glyph": "◦", "text": "whispered, as if someone might hear"},
+    {"label": "calm", "glyph": "○", "text": "calm and slow, plenty of space between phrases"},
+    {"label": "meditative", "glyph": "◎", "text": "meditative, soft, guiding a breath"},
+    {"label": "announcer", "glyph": "◉", "text": "confident announcer, projecting to a room"},
+    {"label": "documentary", "glyph": "▦", "text": "measured documentary narration, authoritative"},
+    {"label": "teaching", "glyph": "✎", "text": "explaining patiently to someone learning"},
+    {"label": "storytelling", "glyph": "❦", "text": "telling a story to a child, colours in the voice"},
+]
+
+TAG = re.compile(r"<([A-Za-z0-9 _'-]{1,40})>")
+
+
+def custom_emotions():
+    if not os.path.isfile(EMOTIONS_FILE):
+        return []
+    try:
+        return json.load(open(EMOTIONS_FILE, encoding="utf-8"))
+    except Exception:
+        # A corrupt file is not a reason to lose the built-ins. It is renamed rather than deleted,
+        # because it is the only copy of whatever was written into it.
+        os.replace(EMOTIONS_FILE, EMOTIONS_FILE + ".broken")
+        return []
+
+
+def all_emotions():
+    """Built-in first, then custom, with a custom label winning if it shadows a built-in one."""
+    out = {e["label"].lower(): dict(e, custom=False) for e in BUILT_IN_EMOTIONS}
+    for e in custom_emotions():
+        if e.get("label") and e.get("text"):
+            out[e["label"].lower()] = dict(e, custom=True)
+    return list(out.values())
+
+
+def segment(text):
+    """
+    SPLIT A LINE INTO PIECES, EACH WITH THE DIRECTION IN FORCE WHEN IT STARTS.
+
+    A tag is written inline: `<excited> this half <weary> and this half`. Everything after a tag is
+    read that way until the next tag, so one line can turn on a word — which is the thing a single
+    direction for a whole utterance cannot do, and the thing an actor is actually for.
+
+    Returns [(spoken text, direction or "")]. Text before any tag has no direction rather than the
+    first one: a line that begins plainly and turns angry halfway is common, and inheriting
+    backwards would make it angry from the start.
+
+    An unknown tag is left in the text rather than swallowed. It is more likely a misspelling than
+    an instruction, and a voice reading "less-than excited greater-than" aloud is a bug somebody
+    can SEE, where silently dropping it is a bug they cannot.
+    """
+    known = {e["label"].lower(): e["text"] for e in all_emotions()}
+    out = []
+    pos = 0
+    current = ""
+    for m in TAG.finditer(text):
+        label = m.group(1).strip().lower()
+        if label not in known:
+            continue
+        chunk = text[pos:m.start()].strip()
+        if chunk:
+            out.append((chunk, current))
+        current = known[label]
+        pos = m.end()
+    tail = text[pos:].strip()
+    if tail:
+        out.append((tail, current))
+    return out or [(text.strip(), "")]
+
+
+def strip_tags(text):
+    """The line as it will be SPOKEN, with the known tags removed. Used by Speechify, which has
+    no direction field at all, and by the cache key so a re-tagged line is a different sound."""
+    known = {e["label"].lower() for e in all_emotions()}
+    return " ".join(TAG.sub(lambda m: "" if m.group(1).strip().lower() in known else m.group(0),
+                            text).split())
 
 
 def clean_text(raw):
@@ -962,6 +1071,8 @@ def preview():
     """A voice says its own name. Short on purpose: ten auditions is ten billed requests."""
     b = request.get_json(force=True) or {}
     line = b.get("line") or ("This is %s." % b.get("name", "this voice"))
+    # The raw line INCLUDING its tags: the same words tagged differently are a different
+    # performance and must not be served from one another's cache entry.
     ck = cache_key("preview", b["engine"], b["voiceId"], b.get("model", ""), line,
                    b.get("direction", ""))
     hit = cached_audio(ck)
@@ -983,6 +1094,47 @@ def read_text(slot):
         return jsonify({"ok": False, "why": "nothing readable in that file"})
     write_meta(pid, slot, {"words": words})
     return jsonify({"ok": True, "words": words, "chars": len(words)})
+
+
+@app.route("/api/emotions")
+def emotions():
+    return jsonify({"emotions": all_emotions()})
+
+
+@app.route("/api/emotions", methods=["POST"])
+def add_emotion():
+    """
+    ONE DATABASE OF DIRECTIONS, SHARED BY EVERY VOICE.
+
+    An emotion belongs to the direction and not to the actor: "the way my father says it" is a
+    note about a delivery, and a note that only works on one voice out of eleven hundred is a note
+    nobody will ever reuse. Added on any card, offered on all of them.
+    """
+    b = request.get_json(force=True) or {}
+    label = (b.get("label") or "").strip().lower()
+    text = (b.get("text") or "").strip()
+    if not label or not text:
+        return jsonify({"ok": False, "why": "an emotion needs a name and a description"})
+    if not re.fullmatch(r"[a-z0-9 _'-]{1,40}", label):
+        # The label becomes a tag inside the line, so it cannot contain the brackets that delimit
+        # it or anything a filename would argue with later.
+        return jsonify({"ok": False, "why": "letters, digits, spaces and dashes only"})
+    items = [e for e in custom_emotions() if e.get("label", "").lower() != label]
+    items.append({"label": label, "glyph": (b.get("glyph") or "•")[:2], "text": text})
+    os.makedirs(APPDIR, exist_ok=True)
+    tmp = EMOTIONS_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(items, f, ensure_ascii=False, indent=1)
+    os.replace(tmp, EMOTIONS_FILE)
+    return jsonify({"ok": True, "emotions": all_emotions()})
+
+
+@app.route("/api/emotions/<label>", methods=["DELETE"])
+def remove_emotion(label):
+    items = [e for e in custom_emotions() if e.get("label", "").lower() != label.lower()]
+    with open(EMOTIONS_FILE, "w", encoding="utf-8") as f:
+        json.dump(items, f, ensure_ascii=False, indent=1)
+    return jsonify({"ok": True, "emotions": all_emotions()})
 
 
 @app.route("/api/keys/import", methods=["POST"])
