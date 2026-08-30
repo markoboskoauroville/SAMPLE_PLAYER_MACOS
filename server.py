@@ -59,6 +59,56 @@ MAX_GAIN = 10.0        # 20 dB. Past this a quiet room becomes a convincing wall
 MIN_SPEECH_MS = 250
 MAX_TEXT = 2000
 
+CACHE = os.path.join(APPDIR, "cache")
+VOICE_CACHE = os.path.join(CACHE, "audio")
+CATALOGUE_TTL = 30 * 24 * 3600   # a month, and there is a button for the impatient
+
+
+def cache_key(*parts):
+    """
+    THE SAME REQUEST TWICE COSTS NOTHING THE SECOND TIME.
+
+    Everything an engine can say is a pure function of the voice, the words and the direction: ask
+    Hume for Beatrice saying "This is Beatrice" angrily and it will hand back the same performance
+    every time. So the answer is filed under a fingerprint of exactly those inputs.
+
+    Auditioning is where this pays. Working down a list of a hundred voices, going back to compare
+    the third against the ninth, trying six emotions on one voice and returning to the second — the
+    naive version bills every one of those and waits twelve seconds for each. This bills the first
+    of each and answers the rest from disk.
+
+    SHA-256 OF THE INPUTS, not of the key: two accounts asking for the same line get the same
+    audio, and the file is named after what was asked rather than after who asked.
+    """
+    import hashlib
+    return hashlib.sha256("\u0000".join(str(p) for p in parts).encode()).hexdigest()[:32]
+
+
+def cached_audio(key):
+    p = os.path.join(VOICE_CACHE, key + ".wav")
+    if os.path.isfile(p) and os.path.getsize(p) > 44:
+        return open(p, "rb").read()
+    return None
+
+
+def put_audio(key, data):
+    os.makedirs(VOICE_CACHE, exist_ok=True)
+    p = os.path.join(VOICE_CACHE, key + ".wav")
+    tmp = p + ".tmp"
+    with open(tmp, "wb") as f:
+        f.write(data)
+    os.replace(tmp, p)
+
+
+def cache_size():
+    n = 0
+    total = 0
+    for root, _, files in os.walk(CACHE):
+        for x in files:
+            n += 1
+            total += os.path.getsize(os.path.join(root, x))
+    return n, total
+
 app = Flask(__name__, static_folder=None)
 
 # THE SERVER DOES NOT NARRATE.
@@ -752,8 +802,61 @@ def do_transcribe(slot):
 
 @app.route("/api/voices/<engine>")
 def voices(engine):
+    """
+    THE CATALOGUE IS FETCHED ONCE AND KEPT.
+
+    Speechify's is 992 voices over five cursor pages and Hume's is 160 over two — seven round
+    trips and several seconds every time the chooser opens, to receive a list that changes when a
+    provider adds a voice, which is a handful of times a year.
+
+    Cached to disk with a month's life on it and a Refresh button beside it, because "rare" is not
+    "never" and the person who notices a new voice is missing should not have to wait for a
+    timeout to see it.
+    """
+    fresh = request.args.get("refresh") == "1"
+    path = os.path.join(CACHE, "catalogue-%s.json" % engine)
+    if not fresh and os.path.isfile(path):
+        age = time.time() - os.path.getmtime(path)
+        if age < CATALOGUE_TTL:
+            d = json.load(open(path, encoding="utf-8"))
+            d["cached"] = True
+            d["age_days"] = round(age / 86400, 1)
+            return jsonify(d)
+
     items, why = speechify_catalogue() if engine == "speechify" else hume_catalogue()
-    return jsonify({"voices": items, "why": why})
+    payload = {"voices": items, "why": why}
+    # A FAILED FETCH IS NOT CACHED. Writing an empty list under a month's TTL would mean one bad
+    # minute of network hides the catalogue until October.
+    if items:
+        os.makedirs(CACHE, exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(payload, f)
+        os.replace(tmp, path)
+    payload["cached"] = False
+    return jsonify(payload)
+
+
+@app.route("/api/cache")
+def cache_state():
+    n, total = cache_size()
+    out = {"files": n, "bytes": total, "mb": round(total / 1048576.0, 1), "catalogues": {}}
+    for e in ("speechify", "hume"):
+        p = os.path.join(CACHE, "catalogue-%s.json" % e)
+        out["catalogues"][e] = (round((time.time() - os.path.getmtime(p)) / 86400.0, 1)
+                                if os.path.isfile(p) else None)
+    return jsonify(out)
+
+
+@app.route("/api/cache/clear", methods=["POST"])
+def cache_clear():
+    """Clear the sounds, keep the catalogues. They are the expensive half and the stable half."""
+    n = 0
+    if os.path.isdir(VOICE_CACHE):
+        for x in os.listdir(VOICE_CACHE):
+            os.remove(os.path.join(VOICE_CACHE, x))
+            n += 1
+    return jsonify({"ok": True, "removed": n})
 
 
 @app.route("/api/speak/<int:slot>", methods=["POST"])
@@ -763,16 +866,25 @@ def do_speak(slot):
     words = body.get("text") or read_meta(pid, slot).get("words", "")
     if not words.strip():
         return jsonify({"ok": False, "why": "nothing to say — transcribe first"})
-    audio_bytes, why = speak(body["engine"], body["voiceId"], body.get("model", ""),
-                             words, body.get("direction", ""))
+    # THE SAME LINE IN THE SAME VOICE IS THE SAME AUDIO. Re-recording a cell clears its generated
+    # files, and regenerating the same words afterwards used to bill for them again — which is the
+    # commonest thing anybody does while deciding between two voices.
+    ck = cache_key("speak", body["engine"], body["voiceId"], body.get("model", ""), words,
+                   body.get("direction", ""))
+    audio_bytes = cached_audio(ck)
+    from_cache = audio_bytes is not None
     if audio_bytes is None:
-        return jsonify({"ok": False, "why": why})
+        audio_bytes, why = speak(body["engine"], body["voiceId"], body.get("model", ""),
+                                 words, body.get("direction", ""))
+        if audio_bytes is None:
+            return jsonify({"ok": False, "why": why})
+        put_audio(ck, audio_bytes)
     out = generated(pid, slot, body["engine"])
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, "wb") as f:
         f.write(audio_bytes)
     write_meta(pid, slot, {"voice": body["engine"], "voiceid": body.get("key", "")})
-    return jsonify({"ok": True})
+    return jsonify({"ok": True, "cached": from_cache})
 
 
 @app.route("/api/preview", methods=["POST"])
@@ -780,11 +892,17 @@ def preview():
     """A voice says its own name. Short on purpose: ten auditions is ten billed requests."""
     b = request.get_json(force=True) or {}
     line = b.get("line") or ("This is %s." % b.get("name", "this voice"))
+    ck = cache_key("preview", b["engine"], b["voiceId"], b.get("model", ""), line,
+                   b.get("direction", ""))
+    hit = cached_audio(ck)
+    if hit is not None:
+        return jsonify({"ok": True, "wav": base64.b64encode(hit).decode(), "cached": True})
     audio_bytes, why = speak(b["engine"], b["voiceId"], b.get("model", ""), line,
                              b.get("direction", ""))
     if audio_bytes is None:
         return jsonify({"ok": False, "why": why})
-    return jsonify({"ok": True, "wav": base64.b64encode(audio_bytes).decode()})
+    put_audio(ck, audio_bytes)
+    return jsonify({"ok": True, "wav": base64.b64encode(audio_bytes).decode(), "cached": False})
 
 
 @app.route("/api/text/<int:slot>", methods=["POST"])

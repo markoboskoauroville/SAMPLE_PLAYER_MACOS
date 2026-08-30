@@ -58,7 +58,19 @@ h2{font-size:14px;font-weight:normal;margin:0 0 8px}
 .male{color:#60a5fa}.female{color:#f472b6}
 input[type=text],input[type=search]{background:#000;border:1px solid #52525b;color:#fff;
        font:inherit;padding:6px;width:100%}
-#stage{color:var(--amber);padding:2px}
+/*
+  THE STATUS LINE, WHICH IS ALWAYS THERE.
+
+  A Hume preview is twelve seconds of nothing: no sound, no change on screen, and no way to tell a
+  slow network from a dead button. So there is one line that says what is happening, and a Braille
+  spinner beside it whenever anything is in flight — the app never looks dead, and the difference
+  between "working" and "broken" is never left to be guessed.
+
+  It sits under the grid rather than over it, because it is a narration and not an interruption.
+*/
+#stage{color:var(--amber);padding:4px 2px;min-height:20px;display:flex;gap:8px;align-items:center}
+#spin{color:var(--amber);width:1em;display:inline-block}
+#stage .from-cache{color:var(--dim)}
 canvas#big{width:100%;height:180px;border:1px solid var(--edge);display:block}
 </style>
 </head>
@@ -93,7 +105,60 @@ const S = {
 };
 const $ = s => document.querySelector(s);
 const api = (p, o) => fetch(p + (p.includes("?") ? "&" : "?") + "project=" + S.project, o);
-function stage(t){ $("#stage").textContent = t || ""; }
+/*
+  ONE SPINNER, COUNTED RATHER THAN TOGGLED.
+
+  Two requests can be in flight at once — a catalogue loading while a preview plays — and a
+  boolean would let the first to finish switch the spinner off while the second is still running.
+  A depth counter cannot: it stops when the last one stops.
+
+  BRAILLE, NOT A CLOCK OR A BAR. Eight dots in one character cell is the smallest thing that can
+  be seen to be moving, it needs no image and no CSS animation, and it is the same spinner the
+  terminal side of this ecosystem uses — so a spinner means the same thing in the launcher and in
+  the page.
+*/
+const SPIN = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
+let busyDepth = 0, spinTimer = 0, spinAt = 0;
+
+function stage(t, cached){
+  const el = $("#stage");
+  el.innerHTML = `<span id="spin"></span><span>${escapeHtml(t || "")}` +
+    (cached ? ` <span class="from-cache">— from cache, nothing spent</span>` : "") + `</span>`;
+}
+
+function spinStart(){
+  if (spinTimer) return;
+  spinTimer = setInterval(() => {
+    const el = $("#spin");
+    if (el) el.textContent = SPIN[spinAt++ % SPIN.length];
+  }, 90);
+}
+function spinStop(){
+  clearInterval(spinTimer); spinTimer = 0;
+  const el = $("#spin"); if (el) el.textContent = "";
+}
+
+/*
+  EVERY REQUEST SAYS WHAT IT IS DOING AND WHEN IT STOPS.
+
+  Wrapped rather than remembered: an await added later without a stage() around it is an await
+  that looks like a hang, and the only way to make that impossible is for the saying to be part
+  of the asking.
+*/
+async function busy(what, fn){
+  busyDepth++;
+  stage(what);
+  spinStart();
+  try {
+    return await fn();
+  } catch (e) {
+    stage("failed: " + (e && e.message ? e.message : e));
+    throw e;
+  } finally {
+    busyDepth--;
+    if (busyDepth === 0) spinStop();
+  }
+}
 
 /* THE LAYOUT IS DERIVED, exactly as on the phone: how many cells and how many pages decide
    the rest. Columns are the square root of a page-load capped at three, which keeps thirty
@@ -145,9 +210,26 @@ function paint(cv, c, i){
   const x = cv.getContext("2d");
   x.scale(devicePixelRatio, devicePixelRatio);
   x.clearRect(0,0,w,h);
+  // WHILE THIS CELL IS RECORDING IT DRAWS THE SCOPE, not the stored waveform — there is no
+  // stored waveform yet, and the old one belongs to a take that is being replaced.
+  if (S.recording === i && scope){
+    const bw = w / SCOPE_BUCKETS;
+    for (let k = 0; k < SCOPE_BUCKETS; k++){
+      const v = scope.peaks[k];
+      // Nothing yet written on the first pass stays dark, so the window is visibly filling
+      // rather than looking like silence that was recorded.
+      if (!v && !scope.wrapped && k >= scope.at) continue;
+      const bh = Math.max(1, v * h);
+      x.fillStyle = getVar("--red");
+      x.fillRect(k * bw, (h - bh) / 2, Math.max(1, bw), bh);
+    }
+    x.fillStyle = getVar("--head");
+    x.fillRect(scope.at * bw, 0, Math.max(1, bw), h);
+    return;
+  }
   const wf = c.waveform || [];
   if (!wf.length) return;
-  x.fillStyle = S.recording === i ? getVar("--red") : getVar("--wave");
+  x.fillStyle = getVar("--wave");
   const bw = w / wf.length;
   wf.forEach((v,k) => { const bh = Math.max(1, v*h); x.fillRect(k*bw, (h-bh)/2, Math.max(1,bw), bh); });
   if (S.playing === i){
@@ -225,6 +307,60 @@ function mk(label, fn, accent){
 */
 let mediaCtx = null, mediaNode = null, mediaStream = null, chunks = [];
 
+/*
+  THE SCOPE: A THREE SECOND WINDOW THAT FILLS, WRAPS, AND FILLS AGAIN.
+
+  Recording into a black rectangle is asking somebody to talk into a hole and find out afterwards.
+  A level meter would answer "is audio arriving", which is worth something — TTT mini's hairline
+  does exactly that and its own header explains why a meter must have a floor. But it cannot
+  answer the question actually being asked here, which is "was that a good take": a meter shows a
+  number and a waveform shows a SHAPE, and the difference between a phrase and a cough is a shape.
+
+  WHY A WRAPPING WINDOW RATHER THAN A SCROLLING ONE. Scrolling means everything on screen moves
+  every frame, which is exactly the animation the design language rules out — the eye is dragged
+  along by it and cannot rest on the part being judged. A wrapping window is still: the drawn part
+  stays where it was drawn, and one bright column travels across it. Only that column moves.
+
+  WHY THREE SECONDS. A recorded line is usually two to five, so three fills most of the width for
+  most takes and wraps once for a long one. Thirty seconds would make an ordinary phrase a fifth
+  of an inch wide; one second would wrap four times and read as noise.
+
+  The full waveform arrives from the server when the take is saved, drawn from the file that was
+  actually written. This is a picture of what is arriving; that is a picture of what was kept.
+*/
+const SCOPE_MS = 3000;
+const SCOPE_BUCKETS = 144;
+let scope = null;
+
+function scopeStart(rate){
+  scope = {
+    peaks: new Float32Array(SCOPE_BUCKETS),
+    at: 0,
+    wrapped: false,
+    perBucket: Math.max(1, Math.round(rate * (SCOPE_MS / 1000) / SCOPE_BUCKETS)),
+    acc: 0,
+    peak: 0,
+  };
+}
+
+function scopePush(block){
+  if (!scope) return;
+  for (let i = 0; i < block.length; i++){
+    const a = block[i] < 0 ? -block[i] : block[i];
+    if (a > scope.peak) scope.peak = a;
+    if (++scope.acc >= scope.perBucket){
+      scope.peaks[scope.at] = scope.peak;
+      scope.at = (scope.at + 1) % SCOPE_BUCKETS;
+      if (scope.at === 0) scope.wrapped = true;
+      scope.acc = 0;
+      scope.peak = 0;
+      // The bucket about to be written is cleared, so the write head has a gap in front of it and
+      // the old pass is visibly behind rather than merged into the new one.
+      scope.peaks[scope.at] = 0;
+    }
+  }
+}
+
 async function startRecording(i){
   try{
     mediaStream = await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,
@@ -234,9 +370,25 @@ async function startRecording(i){
   const src = mediaCtx.createMediaStreamSource(mediaStream);
   mediaNode = mediaCtx.createScriptProcessor(4096, 1, 1);
   chunks = [];
-  mediaNode.onaudioprocess = e => chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+  mediaNode.onaudioprocess = e => {
+    const block = new Float32Array(e.inputBuffer.getChannelData(0));
+    chunks.push(block);
+    scopePush(block);
+  };
   src.connect(mediaNode); mediaNode.connect(mediaCtx.destination);
-  S.recording = i; stage("recording cell " + (i+1) + " — press it again to stop"); draw();
+  scopeStart(mediaCtx.sampleRate);
+  S.recording = i;
+  stage("recording cell " + (i+1) + " — press it again to stop");
+  draw();
+  // REPAINT ON A FRAME TIMER, NOT IN THE AUDIO CALLBACK. Drawing from onaudioprocess would put
+  // canvas work on the thread that must never be late, and a dropped audio block is a hole in the
+  // recording. The scope is allowed to be a frame behind; the take is not.
+  cancelAnimationFrame(scopeRaf);
+  (function scopeTick(){
+    if (S.recording === null) return;
+    repaint();
+    scopeRaf = requestAnimationFrame(scopeTick);
+  })();
 }
 
 async function stopRecording(){
@@ -244,14 +396,17 @@ async function stopRecording(){
   const rate = mediaCtx.sampleRate;
   mediaNode.disconnect(); mediaStream.getTracks().forEach(t => t.stop());
   await mediaCtx.close();
-  S.recording = null; stage("saving…"); draw();
+  S.recording = null;
+  cancelAnimationFrame(scopeRaf);
+  scope = null;
+  draw();
 
   let n = chunks.reduce((a,c) => a + c.length, 0);
   const flat = new Float32Array(n); let at = 0;
   chunks.forEach(c => { flat.set(c, at); at += c.length; });
   const pcm = resample(flat, rate, 44100);
-  const r = await api("/api/record/" + i, {method:"POST", body: wav(pcm, 44100)});
-  const d = await r.json();
+  const d = await busy("checking and normalising the take…", async () =>
+    (await api("/api/record/" + i, {method:"POST", body: wav(pcm, 44100)})).json());
   stage(d.ok ? "cell " + (i+1) + " saved" : d.why);
   await refresh();
 }
@@ -292,7 +447,7 @@ function wav(samples, rate){
   offset and the duration when it is started, so the boundaries are the ones asked for, and
   `loop` on the same node is sample-accurate with no gap at the join.
 */
-let audioCtx = null, node = null, raf = 0;
+let audioCtx = null, node = null, raf = 0, scopeRaf = 0;
 
 function ctx(){ if (!audioCtx) audioCtx = new AudioContext(); return audioCtx; }
 
@@ -579,8 +734,8 @@ function edZoom(){
 window.edZoom = edZoom;
 
 async function transcribe(i){
-  stage("transcribing…");
-  const d = await (await api("/api/transcribe/" + i, {method:"POST"})).json();
+  const d = await busy("uploading and transcribing…", async () =>
+    (await api("/api/transcribe/" + i, {method:"POST"})).json());
   stage(d.ok ? d.words : d.why);
   await refresh(); openCell(i);
 }
@@ -612,8 +767,9 @@ function readText(i){
   f.type = "file"; f.accept = "text/*,.txt,.md";
   f.onchange = async () => {
     const text = await f.files[0].text();
-    const d = await (await api("/api/text/" + i, {method:"POST",
-      headers:{"Content-Type":"application/json"}, body: JSON.stringify({text})})).json();
+    const d = await busy("reading the file…", async () =>
+      (await api("/api/text/" + i, {method:"POST",
+        headers:{"Content-Type":"application/json"}, body: JSON.stringify({text})})).json());
     if (!d.ok) return stage(d.why);
     await refresh();
     const c = S.cells[i];
@@ -741,10 +897,13 @@ async function chooser(slot, engine){
      <b>✦</b>The flagship set: Speechify's newest model carries only those eight and answers 400
      for every other voice. Hume publishes no popularity of any kind, so nothing there is marked.`);
 
-  const d = await (await fetch("/api/voices/" + engine)).json();
+  const d = await busy("fetching the " + engine + " catalogue…",
+    async () => (await fetch("/api/voices/" + engine + (S.refreshCat ? "?refresh=1" : ""))).json());
+  S.refreshCat = false;
   S.voices = d.voices || [];
-  if (d.why) stage(d.why);
   S.index = indexCatalogue(S.voices);
+  stage(d.why || `${S.voices.length} voices` +
+    (d.cached ? ` — cached ${d.age_days} days ago` : " — fetched just now"), d.cached);
   $("#q").oninput = renderVoices;
   renderVoices();
 }
@@ -881,12 +1040,12 @@ async function hearRow(engine, id){
     audition.play();
     return;
   }
-  stage("hearing " + v.name + "…");
-  const d = await (await fetch("/api/preview", {method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({engine, voiceId: id, model: v.model, name: v.name})})).json();
+  const d = await busy("asking " + engine + " for " + v.name + "…", async () =>
+    (await fetch("/api/preview", {method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({engine, voiceId: id, model: v.model, name: v.name})})).json());
   if (!d.ok) return stage(d.why);
-  stage("");
+  stage(v.name, d.cached);
   audition = new Audio("data:audio/wav;base64," + d.wav);
   audition.play();
 }
@@ -955,13 +1114,13 @@ window.star = star;
 async function hear(slot, engine, id, line, direction){
   const v = S.voices.find(x => x.engine===engine && x.id===id);
   if (v.preview && !direction){ new Audio(v.preview).play(); return; }
-  stage("hearing " + v.name + "…");
-  const d = await (await fetch("/api/preview", {method:"POST",
-    headers:{"Content-Type":"application/json"},
-    body: JSON.stringify({engine, voiceId:id, model:v.model, name:v.name,
-                          line: line || null, direction: direction || ""})})).json();
+  const d = await busy((direction ? "acting: " : "hearing ") + v.name + "…", async () =>
+    (await fetch("/api/preview", {method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({engine, voiceId:id, model:v.model, name:v.name,
+                            line: line || null, direction: direction || ""})})).json());
   if (!d.ok) return stage(d.why);
-  stage("");
+  stage(line || v.name, d.cached);
   new Audio("data:audio/wav;base64," + d.wav).play();
 }
 window.hear = hear;
@@ -983,17 +1142,19 @@ window.use = use;
 
 async function speakCell(slot, engine, storedKey, model, voiceId){
   const id = voiceId || (storedKey||"").split("/")[1];
-  const d = await (await api("/api/speak/" + slot, {method:"POST",
-    headers:{"Content-Type":"application/json"},
-    body: JSON.stringify({engine, voiceId:id, model:model||"", key:storedKey||"",
-                          direction: engine === "hume" ? S.direction : ""})})).json();
-  stage(d.ok ? "saved. Your recording is untouched." : d.why);
+  const d = await busy("generating…", async () =>
+    (await api("/api/speak/" + slot, {method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({engine, voiceId:id, model:model||"", key:storedKey||"",
+                            direction: engine === "hume" ? S.direction : ""})})).json());
+  stage(d.ok ? "saved. Your recording is untouched." : d.why, d.cached);
   if (d.ok){ await refresh(); closeScreen(); }
 }
 
 /* ───────────────────────────────────────────────────────────── settings ── */
 async function settings(){
   const k = await (await fetch("/api/keys")).json();
+  setTimeout(showCache, 0);
   screen("Settings   " + (window.VERSION || ""),
     `<div style="color:var(--label)">CELLS</div>
      <div class="row"><button onclick="setCount(-10)">−10</button>
@@ -1017,14 +1178,24 @@ async function settings(){
          `${r.provider}${r.paired?" (pair)":""}  ${r.label||"—"}  ${r.masked}${r.dead?"  DEAD":""}`
        ).join("\n") : "none yet"}</div>
      <div style="height:6px"></div>
-     <button style="width:100%" onclick="importKeys()">Import keys from a file</button>`,
+     <button style="width:100%" onclick="importKeys()">Import keys from a file</button>
+     <div style="color:var(--label);margin-top:10px">CACHE</div>
+     <div id="cachestate" style="font-size:10px;color:var(--dim)">reading…</div>
+     <div class="row" style="margin-top:6px">
+       <button style="flex:1" onclick="refreshCatalogues()">Update voice catalogues</button>
+       <button style="flex:1" onclick="clearCache()">Clear cached sounds</button></div>`,
     `<b>Cells and pages</b>The cells fill the page: one on a page is the size of the page, two
      are halves. Raising the count adds cells at the end; lowering it hides them rather than
      deleting them.
      <b>Waveform detail</b>How finely each cell draws its shape. Higher is slower to open a page.
      <b>When a sample ends</b>Continuous plays on down the set. Single plays the cell you pressed
      and stops.
-     <b>Import keys from a file</b>Pick the note you already have. The app parses it and writes
+     <b>Cache</b>Catalogues are fetched once and kept for a month; a voice list is seven round
+     trips to receive something that changes a few times a year. Every generated sound is kept
+     too, filed under the voice, the words and the direction — so going back to a voice you have
+     already heard costs nothing and waits for nothing. Update the catalogues when a provider adds
+     voices. Clearing the sounds keeps the catalogues, because they are the stable half.
+          <b>Import keys from a file</b>Pick the note you already have. The app parses it and writes
      the file itself — you are never asked to create one or get its shape right. Keys are found by
      SHAPE, so account names, dates, the word CANCELLED and pasted URLs are all fine and are never
      mistaken for credentials; the line above each key is kept as its label. Importing the same
@@ -1043,13 +1214,52 @@ window.settings = settings;
   IMPORTING THE SAME NOTE TWICE CHANGES NOTHING AND SAYS SO. Silently appearing to work is the
   failure that looks identical to success and sends somebody looking for a bug in the ring.
 */
+async function refreshCatalogues(){
+  // A month is a guess and this is the escape from it. Both engines, because whichever one was
+  // being looked at is not necessarily the one that changed.
+  for (const e of ["speechify", "hume"]){
+    S.refreshCat = true;
+    const d = await busy("re-fetching the " + e + " catalogue…", async () =>
+      (await fetch("/api/voices/" + e + "?refresh=1")).json());
+    stage(e + ": " + ((d.voices || []).length) + " voices");
+  }
+  S.refreshCat = false;
+  settings();
+}
+window.refreshCatalogues = refreshCatalogues;
+
+async function clearCache(){
+  const d = await busy("clearing…", async () =>
+    (await fetch("/api/cache/clear", {method:"POST"})).json());
+  stage("removed " + d.removed + " cached sounds");
+  settings();
+}
+window.clearCache = clearCache;
+
+/*
+  THESE TWO ARE NOT WRAPPED, ON PURPOSE.
+
+  showCache and the key list read files off the local disk and answer in a millisecond. A spinner
+  that appears for one frame is noise, and announcing work that is not happening is the same lie
+  the spinner exists to prevent, told in the other direction.
+*/
+async function showCache(){
+  const c = await (await fetch("/api/cache")).json();
+  const el = $("#cachestate");
+  if (!el) return;
+  const ages = Object.entries(c.catalogues)
+    .map(([k, v]) => k + ": " + (v === null ? "not fetched" : v + " days old"));
+  el.textContent = c.files + " cached sounds, " + c.mb + " MB   ·   " + ages.join("   ·   ");
+}
+
 async function importKeys(){
   const f = document.createElement("input");
   f.type = "file"; f.accept = "text/*,.txt,.md,.csv";
   f.onchange = async () => {
     const text = await f.files[0].text();
-    const d = await (await fetch("/api/keys/import", {method:"POST",
-      headers:{"Content-Type":"application/json"}, body: JSON.stringify({text})})).json();
+    const d = await busy("parsing and merging the keys…", async () =>
+      (await fetch("/api/keys/import", {method:"POST",
+        headers:{"Content-Type":"application/json"}, body: JSON.stringify({text})})).json());
     stage(d.why || (d.ok ? "imported" : "nothing imported"));
     settings();
   };
