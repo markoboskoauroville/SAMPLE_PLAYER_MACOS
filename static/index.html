@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sample Player</title>
+<style>
+/*
+  THE SAME LANGUAGE AS THE PHONE. Black, monospace, hollow means empty and solid means full.
+  Not because a Mac has to look like a phone, but because the two are used for the same work an
+  hour apart and a control that means one thing here and another there is a control that has to
+  be read twice.
+*/
+:root{
+  --amber:#e8a64b; --red:#ef4444; --wave:#e8a64b; --head:#fde68a;
+  --dim:#71717a; --label:#94a3b8; --edge:#3f3f46; --text:#e2e8f0;
+}
+*{box-sizing:border-box}
+body{margin:0;background:#000;color:var(--text);
+     font:12px ui-monospace,SFMono-Regular,Menlo,monospace;height:100vh;overflow:hidden}
+#app{display:flex;flex-direction:column;height:100vh;padding:8px}
+.row{display:flex;gap:6px}
+button{background:#000;color:#fff;border:1px solid #52525b;font:inherit;padding:8px 10px;
+       cursor:pointer}
+button.solid{color:#000}
+button:disabled{opacity:.4;cursor:default}
+#head{color:var(--label);padding:4px 2px;display:flex;gap:14px;align-items:center}
+#grid{flex:1;display:grid;gap:4px;min-height:0}
+.cell{border:1px solid var(--edge);padding:4px;display:flex;flex-direction:column;
+      cursor:pointer;min-height:0;overflow:hidden}
+.cell.full{border-color:var(--amber)}
+.cell.rec{border-color:var(--red)}
+.cell .n{color:var(--dim);display:flex;justify-content:space-between}
+.cell.full .n{color:#fff}
+.cell canvas{width:100%;flex:1;min-height:0}
+.cell .w{white-space:nowrap;overflow:hidden;color:var(--text);font-size:10px}
+#bar{padding-top:6px;display:flex;gap:6px;justify-content:flex-end}
+#screen{position:fixed;inset:0;background:#000;padding:12px;overflow:auto;display:none}
+#screen.on{display:block}
+h2{font-size:14px;font-weight:normal;margin:0 0 8px}
+.close{float:right}
+.help{color:var(--dim);font-size:10px;margin-top:24px}
+.help b{color:#cbd5e1;font-weight:normal;display:block;margin-top:8px}
+.chip{display:inline-block;border:1px solid var(--edge);padding:4px 7px;margin:0 4px 4px 0;
+      cursor:pointer;font-size:10px;color:#cbd5e1}
+.chip.on{background:var(--amber);color:#000;border-color:var(--amber)}
+.vrow{border:1px solid #333;padding:6px;margin-bottom:4px;cursor:pointer}
+.male{color:#60a5fa}.female{color:#f472b6}
+input[type=text],input[type=search]{background:#000;border:1px solid #52525b;color:#fff;
+       font:inherit;padding:6px;width:100%}
+#stage{color:var(--amber);padding:2px}
+canvas#big{width:100%;height:180px;border:1px solid var(--edge);display:block}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="head"></div>
+  <div id="grid"></div>
+  <div id="stage"></div>
+  <div id="bar"></div>
+</div>
+<div id="screen"></div>
+
+<script>
+/* ───────────────────────────────────────────────────────────────── state ── */
+const S = {
+  project: "project-01",
+  cells: [], count: 30, pages: 1, buckets: 256,
+  mode: "rec",            // rec | play
+  recording: null,
+  playing: null, playFrom: 0,
+  page: 0,
+  playMode: "continuous",
+  voices: [], engine: null, direction: "", stars: new Set(JSON.parse(localStorage.stars||"[]")),
+};
+const $ = s => document.querySelector(s);
+const api = (p, o) => fetch(p + (p.includes("?") ? "&" : "?") + "project=" + S.project, o);
+function stage(t){ $("#stage").textContent = t || ""; }
+
+/* THE LAYOUT IS DERIVED, exactly as on the phone: how many cells and how many pages decide
+   the rest. Columns are the square root of a page-load capped at three, which keeps thirty
+   looking the way it does there rather than reflowing to six across. */
+function layout(){
+  const per = Math.max(1, Math.ceil(S.count / Math.min(Math.max(1,S.pages), S.count)));
+  const cols = Math.min(3, Math.max(1, Math.ceil(Math.sqrt(per))));
+  return { per, cols, rows: Math.ceil(per / cols), pageCount: Math.ceil(S.count / per) };
+}
+
+/* ─────────────────────────────────────────────────────────── the grid ── */
+function draw(){
+  const L = layout();
+  const g = $("#grid");
+  g.style.gridTemplateColumns = `repeat(${L.cols},1fr)`;
+  g.style.gridTemplateRows = `repeat(${L.rows},1fr)`;
+  g.innerHTML = "";
+  const from = S.page * L.per;
+  for (let k = 0; k < L.per; k++){
+    const i = from + k;
+    if (i >= S.count) break;
+    const c = S.cells[i] || {index:i, waveform:[], words:""};
+    const el = document.createElement("div");
+    el.className = "cell" + (c.hasAudio ? " full":"") + (S.recording===i ? " rec":"");
+    el.innerHTML =
+      `<div class="n"><span>${String(i+1).padStart(2,"0")}</span>` +
+      `<span>${c.loop ? "∞" : ""}</span></div>` +
+      (c.words ? `<div class="w">${escapeHtml(c.words)}</div>` : "") +
+      `<canvas></canvas>`;
+    el.onclick = () => press(i);
+    el.oncontextmenu = e => { e.preventDefault(); openCell(i); };
+    g.appendChild(el);
+    paint(el.querySelector("canvas"), c, i);
+  }
+  $("#head").innerHTML =
+    `<span>${S.project}</span><span>${S.cells.filter(c=>c.hasAudio).length} / ${S.count}</span>` +
+    (L.pageCount > 1 ? `<span>page ${S.page+1} / ${L.pageCount}</span>` : "") +
+    `<span style="color:${S.mode==="rec"?"var(--red)":"var(--amber)"}">${S.mode.toUpperCase()}</span>`;
+  bar();
+}
+
+function escapeHtml(s){ return s.replace(/[&<>]/g, m => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[m])); }
+
+/* CONTINUOUS, NOT A PICKET FENCE. Full-width bars: drawing them at seven tenths of their slot
+   leaves a black gap between every one and the wave reads as stripes. */
+function paint(cv, c, i){
+  const w = cv.clientWidth || 100, h = cv.clientHeight || 40;
+  cv.width = w * devicePixelRatio; cv.height = h * devicePixelRatio;
+  const x = cv.getContext("2d");
+  x.scale(devicePixelRatio, devicePixelRatio);
+  x.clearRect(0,0,w,h);
+  const wf = c.waveform || [];
+  if (!wf.length) return;
+  x.fillStyle = S.recording === i ? getVar("--red") : getVar("--wave");
+  const bw = w / wf.length;
+  wf.forEach((v,k) => { const bh = Math.max(1, v*h); x.fillRect(k*bw, (h-bh)/2, Math.max(1,bw), bh); });
+  if (S.playing === i){
+    x.fillStyle = getVar("--head");
+    const inX = c.lengthMs ? w * c.inMs / c.lengthMs : 0;
+    const outX = c.lengthMs ? w * (c.outMs || c.lengthMs) / c.lengthMs : w;
+    x.fillRect(inX + S.playFrom*(outX-inX), 0, 2, h);
+  }
+}
+function getVar(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+
+/* ───────────────────────────────────────────── the press rule, one place ── */
+/* One gesture, two meanings, and the mode is the only thing between a seek and an overwrite.
+   Recording over a cell that already holds something asks first — and offers Play, because
+   the usual reason a full cell is pressed in record mode is that the mode was forgotten. */
+function press(i){
+  const c = S.cells[i];
+  if (S.mode === "rec"){
+    if (S.recording === i) return stopRecording();
+    if (S.recording !== null) return stage("cell " + (S.recording+1) + " is recording");
+    if (c && c.hasAudio) return confirmBar(i);
+    startRecording(i);
+  } else {
+    if (!c || !c.hasAudio) return stage("nothing in cell " + (i+1));
+    if (c.loop) return toggleLoop(i);
+    play(i);
+  }
+}
+
+function confirmBar(i){
+  $("#bar").innerHTML = "";
+  const q = document.createElement("div");
+  q.style.cssText = "border:1px solid var(--red);padding:8px;flex:1";
+  q.innerHTML = `<div>Cell ${i+1} already has a take. Play it, or record over it?</div>`;
+  const r = document.createElement("div"); r.className = "row"; r.style.marginTop = "8px";
+  r.append(
+    mk("Cancel", () => draw()),
+    mk("Play", () => { S.mode = "play"; play(i); draw(); }, "var(--amber)"),
+    mk("OK", () => { startRecording(i); }, "var(--red)"),
+  );
+  q.appendChild(r); $("#bar").appendChild(q);
+}
+function mk(label, fn, accent){
+  const b = document.createElement("button");
+  b.textContent = label; b.onclick = fn; b.style.flex = "1";
+  if (accent){ b.style.background = accent; b.className = "solid"; b.style.borderColor = accent; }
+  return b;
+}
+
+/* ───────────────────────────────────────────────────────────── recording ── */
+/*
+  THE PAGE BUILDS THE WAV. macOS hands a page the microphone through getUserMedia, and what
+  comes out of MediaRecorder is webm/opus — which would need ffmpeg on the far side to become
+  anything this app can read, draw or loop. So the samples are taken raw, downmixed to mono,
+  resampled to 44 100 and written into a WAV header here. The bytes that reach the server are
+  already the format everything else expects, and the dependency list stays at Flask.
+*/
+let mediaCtx = null, mediaNode = null, mediaStream = null, chunks = [];
+
+async function startRecording(i){
+  try{
+    mediaStream = await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,
+      echoCancellation:false, noiseSuppression:false, autoGainControl:false}});
+  }catch(e){ return stage("no microphone: " + e.message); }
+  mediaCtx = new AudioContext();
+  const src = mediaCtx.createMediaStreamSource(mediaStream);
+  mediaNode = mediaCtx.createScriptProcessor(4096, 1, 1);
+  chunks = [];
+  mediaNode.onaudioprocess = e => chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+  src.connect(mediaNode); mediaNode.connect(mediaCtx.destination);
+  S.recording = i; stage("recording cell " + (i+1) + " — press it again to stop"); draw();
+}
+
+async function stopRecording(){
+  const i = S.recording;
+  const rate = mediaCtx.sampleRate;
+  mediaNode.disconnect(); mediaStream.getTracks().forEach(t => t.stop());
+  await mediaCtx.close();
+  S.recording = null; stage("saving…"); draw();
+
+  let n = chunks.reduce((a,c) => a + c.length, 0);
+  const flat = new Float32Array(n); let at = 0;
+  chunks.forEach(c => { flat.set(c, at); at += c.length; });
+  const pcm = resample(flat, rate, 44100);
+  const r = await api("/api/record/" + i, {method:"POST", body: wav(pcm, 44100)});
+  const d = await r.json();
+  stage(d.ok ? "cell " + (i+1) + " saved" : d.why);
+  await refresh();
+}
+
+/* Linear resampling. Not the best filter there is, and it is honest about that: the browser
+   gives 48 kHz on this machine and 44.1 is one ratio away, so the artefacts are far below the
+   noise floor of a room microphone. */
+function resample(input, from, to){
+  if (from === to) return input;
+  const ratio = from / to, out = new Float32Array(Math.floor(input.length / ratio));
+  for (let i = 0; i < out.length; i++){
+    const p = i * ratio, k = Math.floor(p), f = p - k;
+    out[i] = (input[k] || 0) * (1 - f) + (input[k+1] || 0) * f;
+  }
+  return out;
+}
+
+function wav(samples, rate){
+  const buf = new ArrayBuffer(44 + samples.length * 2);
+  const v = new DataView(buf);
+  const put = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o+i, s.charCodeAt(i)); };
+  put(0,"RIFF"); v.setUint32(4, 36 + samples.length*2, true); put(8,"WAVEfmt ");
+  v.setUint32(16,16,true); v.setUint16(20,1,true); v.setUint16(22,1,true);
+  v.setUint32(24,rate,true); v.setUint32(28,rate*2,true); v.setUint16(32,2,true);
+  v.setUint16(34,16,true); put(36,"data"); v.setUint32(40, samples.length*2, true);
+  for (let i = 0; i < samples.length; i++){
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    v.setInt16(44 + i*2, s < 0 ? s*0x8000 : s*0x7fff, true);
+  }
+  return buf;
+}
+
+/* ─────────────────────────────────────────────────────────────── playback ── */
+/*
+  WEB AUDIO, NOT AN <audio> TAG.
+  A tag would need a seek to honour the in point, and a seek that has not landed when playback
+  starts plays from zero — which is exactly the bug the phone had. A buffer source is given the
+  offset and the duration when it is started, so the boundaries are the ones asked for, and
+  `loop` on the same node is sample-accurate with no gap at the join.
+*/
+let audioCtx = null, node = null, raf = 0;
+
+function ctx(){ if (!audioCtx) audioCtx = new AudioContext(); return audioCtx; }
+
+async function play(i, looping){
+  stopAudio();
+  const c = S.cells[i];
+  const res = await api("/api/audio/" + i);
+  if (!res.ok) return stage("nothing to play in cell " + (i+1));
+  const buf = await ctx().decodeAudioData(await res.arrayBuffer());
+  const inS = (c.inMs || 0) / 1000;
+  const outS = (c.outMs || c.lengthMs || buf.duration*1000) / 1000;
+  node = ctx().createBufferSource();
+  node.buffer = buf;
+  if (looping){ node.loop = true; node.loopStart = inS; node.loopEnd = outS; }
+  node.connect(ctx().destination);
+  const started = ctx().currentTime;
+  node.start(0, inS, looping ? undefined : Math.max(0.01, outS - inS));
+  S.playing = i;
+  node.onended = () => { if (S.playing === i && !looping) advance(i); };
+
+  cancelAnimationFrame(raf);
+  const span = Math.max(0.01, outS - inS);
+  (function tick(){
+    if (S.playing !== i) return;
+    const t = (ctx().currentTime - started) % span;
+    S.playFrom = Math.min(1, t / span);
+    draw();
+    raf = requestAnimationFrame(tick);
+  })();
+}
+
+function advance(i){
+  if (S.playMode === "single") return stopAudio();
+  const order = S.cells.filter(c => c.hasAudio).map(c => c.index);
+  const at = order.indexOf(i);
+  const next = order[at + 1];
+  if (next === undefined) stopAudio(); else play(next);
+}
+
+function stopAudio(){
+  if (node){ try { node.stop(); } catch(e){} node.disconnect(); node = null; }
+  S.playing = null; cancelAnimationFrame(raf); draw();
+}
+
+function toggleLoop(i){
+  if (S.playing === i) return stopAudio();
+  play(i, true);
+}
+
+/* ─────────────────────────────────────────────────────────────── the bar ── */
+function bar(){
+  const b = $("#bar"); b.innerHTML = "";
+  const spacer = document.createElement("div"); spacer.style.flex = "1"; b.appendChild(spacer);
+  const L = layout();
+  if (L.pageCount > 1){
+    b.appendChild(mk("‹", () => { S.page = Math.max(0, S.page-1); draw(); }));
+    b.appendChild(mk("›", () => { S.page = Math.min(L.pageCount-1, S.page+1); draw(); }));
+  }
+  b.appendChild(mk(S.mode === "play" ? "PLAY" : "REC",
+    () => { stopAudio(); S.mode = S.mode === "play" ? "rec" : "play"; draw(); },
+    S.mode === "play" ? "var(--amber)" : "var(--red)"));
+  b.appendChild(mk("⚙", settings));
+}
+
+/* ────────────────────────────────────────────────────────────── screens ── */
+/* One × in the top right on every screen that is not the grid, and all the help in one block
+   at the bottom. Two lines under every control is useful once and noise the fiftieth time. */
+function screen(title, html, help){
+  const s = $("#screen");
+  s.className = "on";
+  s.innerHTML = `<button class="close" onclick="closeScreen()">×</button><h2>${title}</h2>` +
+                html + (help ? `<div class="help"><b>WHAT THESE DO</b>${help}</div>` : "");
+}
+function closeScreen(){ $("#screen").className = ""; refresh(); }
+window.closeScreen = closeScreen;
+
+async function openCell(i){
+  const c = S.cells[i];
+  screen("Cell " + String(i+1).padStart(2,"0"),
+    (c.words ? `<div style="color:var(--label);margin-bottom:8px">${escapeHtml(c.words)}</div>` : "") +
+    `<div class="row"><button style="flex:2" onclick="editor(${i})">Edit playback points</button>
+     <button style="flex:1" onclick="loopFlag(${i})">${c.loop ? "∞ on" : "∞"}</button></div>
+     <div style="height:6px"></div>
+     <button style="width:100%" onclick="transcribe(${i})">Transcribe</button>
+     <div style="height:6px"></div>
+     <button style="width:100%" onclick="readText(${i})">Read a text file aloud</button>
+     <div style="height:6px"></div>
+     <div class="row"><button style="flex:1" onclick="chooser(${i},'speechify')">Speechify</button>
+     <button style="flex:1" onclick="chooser(${i},'hume')">Hume</button></div>
+     <div style="height:6px"></div>
+     <button style="width:100%" onclick="revert(${i})">Play my own recording again</button>
+     <div style="height:16px"></div>
+     <button style="width:100%;border-color:var(--red)" onclick="del(${i})">Delete this recording</button>`,
+    `<b>Edit playback points</b>Drag the handles. Nothing is cut: the points are two numbers
+     beside the recording and the audio is untouched.
+     <b>∞</b>A flag, not a start button. A marked cell carries ∞ on the grid; in play mode one
+     press starts it looping and the next stops it, with no gap at the join.
+     <b>Transcribe</b>The words become the cell's text, exactly as spoken.
+     <b>Read a text file aloud</b>The other direction: hand it a file and a voice reads it. If
+     this cell has no voice yet, pick one first.
+     <b>Speechify / Hume</b>Opens the voice chooser for that engine.
+     <b>Delete</b>There is no undo, and there is not meant to be one.`);
+}
+window.openCell = openCell;
+
+async function transcribe(i){
+  stage("transcribing…");
+  const d = await (await api("/api/transcribe/" + i, {method:"POST"})).json();
+  stage(d.ok ? d.words : d.why);
+  await refresh(); openCell(i);
+}
+window.transcribe = transcribe;
+
+async function loopFlag(i){
+  const on = !S.cells[i].loop;
+  await api("/api/meta/" + i, {method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({loop: on ? "1" : "0"})});
+  await refresh(); openCell(i);
+}
+window.loopFlag = loopFlag;
+
+async function revert(i){
+  await api("/api/meta/" + i, {method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({voice: ""})});
+  stage("back to your own recording"); await refresh(); openCell(i);
+}
+window.revert = revert;
+
+async function del(i){
+  await api("/api/delete/" + i, {method:"POST"});
+  stage("cell " + (i+1) + " deleted"); closeScreen();
+}
+window.del = del;
+
+function readText(i){
+  const f = document.createElement("input");
+  f.type = "file"; f.accept = "text/*,.txt,.md";
+  f.onchange = async () => {
+    const text = await f.files[0].text();
+    const d = await (await api("/api/text/" + i, {method:"POST",
+      headers:{"Content-Type":"application/json"}, body: JSON.stringify({text})})).json();
+    if (!d.ok) return stage(d.why);
+    await refresh();
+    const c = S.cells[i];
+    if (!c.voice){ stage(d.chars + " characters. Now pick Speechify or Hume to read it."); openCell(i); }
+    else { stage("reading it…"); await speakCell(i, c.voice, c.voiceId); }
+  };
+  f.click();
+}
+window.readText = readText;
+
+/* ─────────────────────────────────────────────────────────────── editor ── */
+let ed = null;
+async function editor(i){
+  const c = S.cells[i];
+  ed = {i, inMs: c.inMs, outMs: c.outMs || c.lengthMs, zoom: null};
+  screen("Cell " + String(i+1).padStart(2,"0") + " — playback points",
+    `<canvas id="big"></canvas>
+     <div style="margin:6px 0"><span style="color:var(--amber)">▌yellow = in</span>
+     <span style="color:var(--red);margin-left:12px">▌red = out</span></div>
+     <div id="edread" style="color:var(--label)"></div>
+     <div class="row" style="margin-top:8px">
+       <button style="flex:1;background:var(--amber);color:#000" onclick="edPlay()">Play</button>
+       <button style="flex:1" onclick="edZoom()">Zoom to in / out</button></div>`,
+    `<b>The two handles</b>Drag from the LEFT half of the waveform to move the start, from the
+     RIGHT half to move the stop. The side you begin on decides which handle you have and it
+     does not change under the pointer.
+     <b>Play</b>Plays between the points, once.
+     <b>Zoom to in / out</b>Shows only the part between the points with a little either side.
+     Press again for the whole recording. Nothing is ever cut.`);
+  const cv = $("#big");
+  cv.onpointerdown = e => {
+    const r = cv.getBoundingClientRect();
+    ed.dragIn = (e.clientX - r.left) < r.width/2;
+    cv.setPointerCapture(e.pointerId);
+  };
+  cv.onpointermove = e => {
+    if (!cv.hasPointerCapture(e.pointerId)) return;
+    const r = cv.getBoundingClientRect();
+    const win = ed.zoom || [0, c.lengthMs];
+    const ms = win[0] + ((e.clientX - r.left)/r.width) * (win[1]-win[0]);
+    if (ed.dragIn) ed.inMs = Math.max(0, Math.min(ms, ed.outMs - 120));
+    else ed.outMs = Math.min(c.lengthMs, Math.max(ms, ed.inMs + 120));
+    paintBig();
+  };
+  cv.onpointerup = save;
+  paintBig();
+}
+window.editor = editor;
+
+function paintBig(){
+  const c = S.cells[ed.i], cv = $("#big");
+  const w = cv.clientWidth, h = 180;
+  cv.width = w*devicePixelRatio; cv.height = h*devicePixelRatio;
+  const x = cv.getContext("2d"); x.scale(devicePixelRatio, devicePixelRatio);
+  x.clearRect(0,0,w,h);
+  const win = ed.zoom || [0, c.lengthMs || 1];
+  const span = Math.max(1, win[1]-win[0]);
+  const wf = c.waveform || [];
+  const first = Math.floor(wf.length * win[0] / (c.lengthMs||1));
+  const last = Math.max(first+1, Math.ceil(wf.length * win[1] / (c.lengthMs||1)));
+  const shown = wf.slice(first, last);
+  const bw = w / Math.max(1, shown.length);
+  const xOf = ms => ((ms - win[0]) / span) * w;
+  const inX = xOf(ed.inMs), outX = xOf(ed.outMs);
+  shown.forEach((v,k) => {
+    const bh = Math.max(1, v*h*0.9), px = k*bw;
+    x.fillStyle = (px >= inX && px <= outX) ? getVar("--wave") : "#3f3f46";
+    x.fillRect(px, (h-bh)/2, Math.max(1,bw), bh);
+  });
+  x.fillStyle = getVar("--amber"); x.fillRect(Math.min(w-5,Math.max(0,inX)), 0, 5, h);
+  x.fillStyle = getVar("--red");   x.fillRect(Math.min(w-5,Math.max(0,outX-5)), 0, 5, h);
+  $("#edread").textContent =
+    `in ${(ed.inMs/1000).toFixed(2)}s   out ${(ed.outMs/1000).toFixed(2)}s   ` +
+    `plays ${((ed.outMs-ed.inMs)/1000).toFixed(2)}s of ${((c.lengthMs||0)/1000).toFixed(2)}s`;
+}
+
+async function save(){
+  await api("/api/meta/" + ed.i, {method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({in: Math.round(ed.inMs), out: Math.round(ed.outMs)})});
+  const c = S.cells[ed.i]; c.inMs = Math.round(ed.inMs); c.outMs = Math.round(ed.outMs);
+}
+async function edPlay(){ await save(); play(ed.i); }
+window.edPlay = edPlay;
+function edZoom(){
+  if (ed.zoom) ed.zoom = null;
+  else {
+    const m = Math.max(50, (ed.outMs - ed.inMs)/8);
+    ed.zoom = [Math.max(0, ed.inMs-m), Math.min(S.cells[ed.i].lengthMs, ed.outMs+m)];
+  }
+  paintBig();
+}
+window.edZoom = edZoom;
+
+/* ───────────────────────────────────────────────────────── voice chooser ── */
+async function chooser(slot, engine){
+  S.engine = engine;
+  screen(engine === "hume" ? "Hume voices" : "Speechify voices",
+    `<input id="q" type="search" placeholder="find — try: brit female">
+     <div id="facets" style="margin:6px 0"></div>
+     <div id="vlist">loading the catalogue…</div>`, "");
+  const d = await (await fetch("/api/voices/" + engine)).json();
+  S.voices = d.voices || [];
+  if (d.why) stage(d.why);
+  $("#q").oninput = () => renderVoices(slot);
+  renderVoices(slot);
+}
+window.chooser = chooser;
+
+/* Word-prefix and multi-term: "brit female" narrows two axes at once although those two words
+   never appear next to each other in any voice. */
+function matches(v, q){
+  const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!terms.length) return true;
+  const words = [v.name, v.gender, v.age, v.language, v.accent, (v.tags||[]).join(" ")]
+    .join(" ").toLowerCase().split(/[^a-z0-9]+/);
+  return terms.every(t => words.some(w => w.startsWith(t)));
+}
+
+function renderVoices(slot){
+  const q = $("#q").value;
+  const list = S.voices.filter(v => matches(v,q)).sort((a,b) =>
+    (S.stars.has(key(b)) - S.stars.has(key(a))) || (b.flagship - a.flagship) ||
+    a.name.localeCompare(b.name));
+  $("#vlist").innerHTML = `<div style="color:var(--dim)">${list.length} of ${S.voices.length}</div>` +
+    list.slice(0, 400).map(v => {
+      const g = (v.gender||"").toLowerCase();
+      return `<div class="vrow" onclick="card(${slot},'${v.engine}','${v.id}')">
+        <span class="${g==='male'?'male':g==='female'?'female':''}">${escapeHtml(v.name)}</span>
+        ${S.stars.has(key(v)) ? " ★" : ""}${v.flagship ? " ✦" : ""}
+        <div style="color:var(--label);font-size:10px">
+          ${[v.gender,v.age,v.language,v.accent].filter(Boolean).join(" · ")}</div></div>`;
+    }).join("");
+}
+function key(v){ return v.engine + "/" + v.id; }
+
+const EMOTIONS = [
+  ["Neutral","—","even and unhurried, no particular emotion","is speaking plainly"],
+  ["Happy","☀","genuinely happy, light and quick","is happy"],
+  ["Excited","⚡","excited, can hardly get the words out fast enough","is excited"],
+  ["Kind","♡","gentle and kind, unhurried","is being kind"],
+  ["Sad","▽","sad and quiet, slowing at the ends of phrases","is sad"],
+  ["Weary","…","weary, worn out, no energy left for emphasis","is exhausted"],
+  ["Angry","✖","angry, clipped and hard on the consonants","is angry"],
+  ["Firm","▮","firm and final, leaving no room to argue","is being firm"],
+  ["Sarcastic","¬","dry and sarcastic, meaning the opposite","is being sarcastic"],
+  ["Anxious","◌","anxious, breath high and shallow","is anxious"],
+  ["Urgent","!","urgent, needs to be understood immediately","is in a hurry"],
+  ["Whispered","◦","whispered, as if someone might hear","is whispering"],
+  ["Calm","○","calm and slow, plenty of space between phrases","is calm"],
+  ["Meditative","◎","meditative, soft, guiding a breath","is meditating"],
+  ["Announcer","◉","confident announcer, projecting to a room","is announcing"],
+  ["Storytelling","❦","telling a story to a child, colours in the voice","is telling a story"],
+];
+
+function card(slot, engine, id){
+  const v = S.voices.find(x => x.engine===engine && x.id===id);
+  const star = S.stars.has(key(v));
+  screen(escapeHtml(v.name),
+    `<div style="font-size:20px" class="${(v.gender||"").toLowerCase()}">${escapeHtml(v.name)}
+       <span onclick="star('${key(v)}')" style="cursor:pointer">${star?"★":"☆"}</span></div>
+     <div style="color:var(--dim)">${engine}${v.flagship?" · ✦ flagship":""}</div>
+     <div class="row" style="margin:10px 0">
+       <button style="flex:1" onclick="hear(${slot},'${engine}','${id}')">Hear it</button>
+       <button style="flex:1;background:var(--amber);color:#000"
+               onclick="use(${slot},'${engine}','${id}')">Use this voice</button></div>
+     <div style="color:var(--label);font-size:10px;white-space:pre-line">${
+       [["gender",v.gender],["age",v.age],["language",v.language],["accent",v.accent],
+        ["id",v.id],["model",v.model]].filter(r=>r[1]).map(r=>r[0].padEnd(9)+r[1]).join("\n")
+     }\n${(v.tags||[]).join("  ")}</div>` +
+    (engine === "hume" ? `<div style="margin-top:14px;color:var(--label)">HOW IT SAYS IT</div>
+       <div id="emo">${EMOTIONS.map((e,k)=>
+         `<span class="chip" onclick="emo(${slot},'${engine}','${id}',${k})">${e[1]} ${e[0]}</span>`
+       ).join("")}</div>` : ""),
+    `<b>Hear it</b>The voice says its own name. Short on purpose: ten auditions on a long line
+     is ten long waits and ten times the billed characters.
+     <b>Use this voice</b>Speaks this cell's text and stores it BESIDE your recording. Your take
+     is never replaced.
+     <b>How it says it</b>Hume reads the direction as prose rather than matching a list, so these
+     are starting points. Tapping one previews it: the voice says its own name and what it is
+     doing. Speechify has no such field, so this only appears for Hume.`);
+}
+window.card = card;
+
+function star(k){
+  S.stars.has(k) ? S.stars.delete(k) : S.stars.add(k);
+  localStorage.stars = JSON.stringify([...S.stars]);
+}
+window.star = star;
+
+async function hear(slot, engine, id, line, direction){
+  const v = S.voices.find(x => x.engine===engine && x.id===id);
+  if (v.preview && !direction){ new Audio(v.preview).play(); return; }
+  stage("hearing " + v.name + "…");
+  const d = await (await fetch("/api/preview", {method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({engine, voiceId:id, model:v.model, name:v.name,
+                          line: line || null, direction: direction || ""})})).json();
+  if (!d.ok) return stage(d.why);
+  stage("");
+  new Audio("data:audio/wav;base64," + d.wav).play();
+}
+window.hear = hear;
+
+function emo(slot, engine, id, k){
+  const e = EMOTIONS[k];
+  const v = S.voices.find(x => x.engine===engine && x.id===id);
+  S.direction = e[2];
+  hear(slot, engine, id, v.name + " " + e[3] + ".", e[2]);
+}
+window.emo = emo;
+
+async function use(slot, engine, id){
+  const v = S.voices.find(x => x.engine===engine && x.id===id);
+  stage("generating " + v.name + "…");
+  await speakCell(slot, engine, key(v), v.model, id);
+}
+window.use = use;
+
+async function speakCell(slot, engine, storedKey, model, voiceId){
+  const id = voiceId || (storedKey||"").split("/")[1];
+  const d = await (await api("/api/speak/" + slot, {method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({engine, voiceId:id, model:model||"", key:storedKey||"",
+                          direction: engine === "hume" ? S.direction : ""})})).json();
+  stage(d.ok ? "saved. Your recording is untouched." : d.why);
+  if (d.ok){ await refresh(); closeScreen(); }
+}
+
+/* ───────────────────────────────────────────────────────────── settings ── */
+async function settings(){
+  const k = await (await fetch("/api/keys")).json();
+  screen("Settings   " + (window.VERSION || ""),
+    `<div style="color:var(--label)">CELLS</div>
+     <div class="row"><button onclick="setCount(-10)">−10</button>
+       <button onclick="setCount(-1)">−1</button>
+       <span style="flex:1;text-align:center;font-size:16px">${S.count}</span>
+       <button onclick="setCount(1)">+1</button><button onclick="setCount(10)">+10</button></div>
+     <div style="color:var(--label);margin-top:10px">PAGES</div>
+     <div class="row"><button onclick="setPages(-1)">−1</button>
+       <span style="flex:1;text-align:center;font-size:16px">${S.pages}</span>
+       <button onclick="setPages(1)">+1</button></div>
+     <div style="color:var(--label);margin-top:10px">WAVEFORM DETAIL — ${S.buckets} slices</div>
+     <div class="row">${[64,128,256,512].map(n =>
+        `<button style="flex:1" onclick="setBuckets(${n})">${n}</button>`).join("")}</div>
+     <div style="color:var(--label);margin-top:10px">WHEN A SAMPLE ENDS</div>
+     <div class="row">
+       <button style="flex:1" onclick="setPlayMode('continuous')">Continuous</button>
+       <button style="flex:1" onclick="setPlayMode('single')">Single</button></div>
+     <div style="color:var(--label);margin-top:10px">KEYS</div>
+     <div style="color:var(--dim);font-size:10px">${k.file}</div>
+     <div style="font-size:10px;white-space:pre-line">${
+       k.keys.length ? k.keys.map(r =>
+         `${r.provider}${r.paired?" (pair)":""}  ${r.label||"—"}  ${r.masked}${r.dead?"  DEAD":""}`
+       ).join("\n") : "none yet"}</div>`,
+    `<b>Cells and pages</b>The cells fill the page: one on a page is the size of the page, two
+     are halves. Raising the count adds cells at the end; lowering it hides them rather than
+     deleting them.
+     <b>Waveform detail</b>How finely each cell draws its shape. Higher is slower to open a page.
+     <b>When a sample ends</b>Continuous plays on down the set. Single plays the cell you pressed
+     and stops.
+     <b>Keys</b>Put the whole note in the file named above, one paste, prose and all — it is read
+     by the same parser as the phone. AssemblyAI transcribes and is required; Speechify and Hume
+     are the two engines and either is enough. Keys are never displayed.`);
+}
+window.settings = settings;
+const setCount = n => { S.count = Math.max(1, Math.min(300, S.count+n)); localStorage.count = S.count; refresh().then(settings); };
+const setPages = n => { S.pages = Math.max(1, Math.min(S.count, S.pages+n)); localStorage.pages = S.pages; settings(); draw(); };
+const setBuckets = n => { S.buckets = n; localStorage.buckets = n; refresh().then(settings); };
+const setPlayMode = m => { S.playMode = m; localStorage.playMode = m; settings(); };
+Object.assign(window, {setCount, setPages, setBuckets, setPlayMode});
+
+/* ────────────────────────────────────────────────────────────── hotkeys ── */
+/*
+  WHAT THE OVERLAY TRIANGLE DID ON THE PHONE, THE KEYBOARD DOES HERE. The triangle exists
+  because a phone shows one app at a time; a Mac shows the script and this window side by side.
+  Space is the same gesture: stop this cell, start the next.
+*/
+document.addEventListener("keydown", e => {
+  if (e.target.tagName === "INPUT") return;
+  if (e.key === " "){ e.preventDefault(); nextCell(); }
+  if (e.key === "Escape"){ stopAudio(); if (S.recording !== null) stopRecording(); closeScreen(); }
+  if (e.key === "m"){ stopAudio(); S.mode = S.mode === "play" ? "rec" : "play"; draw(); }
+  if (e.key === "ArrowRight"){ S.page = Math.min(layout().pageCount-1, S.page+1); draw(); }
+  if (e.key === "ArrowLeft"){ S.page = Math.max(0, S.page-1); draw(); }
+});
+
+async function nextCell(){
+  if (S.recording === null){
+    const first = S.cells.findIndex(c => !c.hasAudio);
+    if (first >= 0) startRecording(first);
+    return;
+  }
+  const i = S.recording;
+  await stopRecording();
+  // IT DOES NOT WRAP. Wrapping would overwrite cell 1 while nobody is looking at the grid.
+  if (i + 1 < S.count) startRecording(i + 1);
+  else stage("cell " + S.count + " is the last one");
+}
+
+/* ───────────────────────────────────────────────────────────────── boot ── */
+async function refresh(){
+  const r = await fetch(`/api/state?project=${S.project}&cells=${S.count}&buckets=${S.buckets}`);
+  S.cells = (await r.json()).cells;
+  draw();
+}
+S.count = +(localStorage.count || 30);
+S.pages = +(localStorage.pages || 1);
+S.buckets = +(localStorage.buckets || 256);
+S.playMode = localStorage.playMode || "continuous";
+addEventListener("resize", draw);
+refresh();
+</script>
+</body>
+</html>
