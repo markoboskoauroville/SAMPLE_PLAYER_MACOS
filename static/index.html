@@ -774,7 +774,7 @@ function readText(i){
     await refresh();
     const c = S.cells[i];
     if (!c.voice){ stage(d.chars + " characters. Now pick Speechify or Hume to read it."); openCell(i); }
-    else { stage("reading it…"); await speakCell(i, c.voice, c.voiceId); }
+    else { await speakCell(i, c.voice, c.voiceId, null, c.voice); }
   };
   f.click();
 }
@@ -1024,10 +1024,9 @@ function renderVoices(){
   without a single handle to stop the last one they overlap into noise — which sounds like the
   app being broken rather than like the person being quick.
 
-  SPEECHIFY IS FREE AND INSTANT: it publishes a preview clip on its own CDN, so nothing is
-  generated and nothing is billed. HUME PUBLISHES NONE, so its preview is a real call that says
-  the voice's own name — short on purpose, because Hume paces at about twelve seconds and a full
-  sentence would make ten auditions two minutes of waiting.
+  BOTH ENGINES GENERATE THE SAME SHORT LINE and both are cached, so a voice heard once costs one
+  call ever. Speechify answers in about a second and bills eighteen characters; Hume paces at
+  about twelve seconds, which is why the line is the voice's own name and not a sentence.
 */
 let audition = null;
 
@@ -1035,11 +1034,23 @@ async function hearRow(engine, id){
   const v = S.voices.find(x => x.engine === engine && x.id === id);
   if (!v) return;
   if (audition){ audition.pause(); audition = null; }
-  if (v.preview){
-    audition = new Audio(v.preview);
-    audition.play();
-    return;
-  }
+
+  /*
+    WHY SPEECHIFY USED TO GIVE A SPEECH, AND HUME DID NOT.
+
+    Nothing was inventing words. Speechify publishes a `preview_audio` URL on every voice — its
+    own marketing demo, a paragraph of ad copy recorded by that voice — and this played it,
+    because it is free and instant and needs no call. Hume publishes no such clip, so its preview
+    was always generated from the line asked for, which is why it said what it was told.
+
+    The result was two engines behaving differently on the same button: one saying its name in two
+    seconds, the other reading a stranger's script for fifteen. A control that means two different
+    things depending on which list you are in is a control nobody can learn.
+
+    SO NEITHER USES THE CDN CLIP NOW. Both generate the same short line, and both are cached under
+    the voice and the words — so a voice heard once costs one call ever, and eighteen characters
+    of Speechify at that. The demo clip was free; the confusion was not.
+  */
   const d = await busy("asking " + engine + " for " + v.name + "…", async () =>
     (await fetch("/api/preview", {method: "POST",
       headers: {"Content-Type": "application/json"},
@@ -1113,7 +1124,8 @@ window.star = star;
 
 async function hear(slot, engine, id, line, direction){
   const v = S.voices.find(x => x.engine===engine && x.id===id);
-  if (v.preview && !direction){ new Audio(v.preview).play(); return; }
+  // The CDN demo clip is not used here either, for the reason written above hearRow: the same
+  // button must mean the same thing on both engines.
   const d = await busy((direction ? "acting: " : "hearing ") + v.name + "…", async () =>
     (await fetch("/api/preview", {method:"POST",
       headers:{"Content-Type":"application/json"},
@@ -1135,20 +1147,35 @@ window.emo = emo;
 
 async function use(slot, engine, id){
   const v = S.voices.find(x => x.engine===engine && x.id===id);
-  stage("generating " + v.name + "…");
-  await speakCell(slot, engine, key(v), v.model, id);
+  /*
+    THE CARD CLOSES FIRST AND THE WORK HAPPENS IN THE OPEN.
+
+    It used to generate and then close, so the twelve seconds were spent looking at the voice card
+    with a spinner on it — a screen about choosing, while the thing being waited for was a cell
+    somewhere behind it. Closing first puts the grid back, with the cell that is about to change
+    visible, and the status line underneath saying what is being made. When it lands, the waveform
+    appears where the eye already is.
+  */
+  closeScreen();
+  await speakCell(slot, engine, key(v), v.model, id, v.name);
 }
 window.use = use;
 
-async function speakCell(slot, engine, storedKey, model, voiceId){
+async function speakCell(slot, engine, storedKey, model, voiceId, name){
   const id = voiceId || (storedKey||"").split("/")[1];
-  const d = await busy("generating…", async () =>
+  const d = await busy(
+    "cell " + (slot+1) + ": " + (name ? name + " is saying it" : "generating") + "…",
+    async () =>
     (await api("/api/speak/" + slot, {method:"POST",
       headers:{"Content-Type":"application/json"},
       body: JSON.stringify({engine, voiceId:id, model:model||"", key:storedKey||"",
                             direction: engine === "hume" ? S.direction : ""})})).json());
-  stage(d.ok ? "saved. Your recording is untouched." : d.why, d.cached);
-  if (d.ok){ await refresh(); closeScreen(); }
+  if (!d.ok) return stage(d.why);
+  // The waveform is redrawn from the file that was actually written, so what appears is what will
+  // play rather than a promise that it worked.
+  await busy("drawing the waveform…", refresh);
+  stage("cell " + (slot+1) + ": " + (name || "voice") + " saved. Your recording is untouched.",
+        d.cached);
 }
 
 /* ───────────────────────────────────────────────────────────── settings ── */
