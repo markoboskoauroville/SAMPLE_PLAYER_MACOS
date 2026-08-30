@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  THE SAME MARK AS THE PHONE, drawn from the same numbers.
+
+  The Android launcher icon is a vector on a 108 canvas: a stroked square in a 42 box centred at
+  54,54, with eleven bars inside it. That geometry is copied here rather than redrawn by eye, so
+  the two are the same mark and not two drawings of the same idea — a tab and a home screen sitting
+  a few centimetres apart is exactly where a near-miss would be noticed.
+
+  What is different is the background. The launcher gets a black plate from the system; a favicon
+  is composited onto whatever colour the browser's tab strip happens to be, so the plate is drawn
+  here. Without it the amber bars sit on white in a light theme and vanish.
+
+  ELEVEN BARS, NOT A SINE WAVE. A drawn wave is a picture of sound in general; bars of differing
+  height are a picture of THIS recording, which is what the cells show and what the app is for.
+  The heights are asymmetric on purpose: a symmetrical set reads as a graphic, an uneven one reads
+  as a measurement.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="108" height="108" viewBox="0 0 108 108">
+  <rect width="108" height="108" fill="#000000"/>
+
+  <!-- The square. Stroked rather than filled, so the waveform inside is the ink that reads. -->
+  <path d="M34.5 34.5 L73.5 34.5 L73.5 73.5 L34.5 73.5 Z"
+        fill="none" stroke="#E8A64B" stroke-width="3"/>
+
+  <!-- Eleven bars, centred on y=54, heights 8..26, spaced 2.8 apart. -->
+  <g fill="#E8A64B">
+    <rect x="39.0" y="49.0" width="2" height="10"/>
+    <rect x="41.8" y="45.0" width="2" height="18"/>
+    <rect x="44.6" y="41.0" width="2" height="26"/>
+    <rect x="47.4" y="47.0" width="2" height="14"/>
+    <rect x="50.2" y="43.0" width="2" height="22"/>
+    <rect x="53.0" y="50.0" width="2" height="8"/>
+    <rect x="55.8" y="42.0" width="2" height="24"/>
+    <rect x="58.6" y="46.0" width="2" height="16"/>
+    <rect x="61.4" y="44.0" width="2" height="20"/>
+    <rect x="64.2" y="48.0" width="2" height="12"/>
+    <rect x="67.0" y="50.0" width="2" height="8"/>
+  </g>
+</svg>

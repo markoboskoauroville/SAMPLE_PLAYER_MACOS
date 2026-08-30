@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sample Player</title>
+<link rel="icon" type="image/svg+xml" href="/static/icon.svg">
 <style>
 /*
   THE SAME LANGUAGE AS THE PHONE. Black, monospace, hollow means empty and solid means full.
@@ -38,7 +39,15 @@ button:disabled{opacity:.4;cursor:default}
 #screen{position:fixed;inset:0;background:#000;padding:12px;overflow:auto;display:none}
 #screen.on{display:block}
 h2{font-size:14px;font-weight:normal;margin:0 0 8px}
-.close{float:right}
+/*
+  THE CLOSE BUTTON SITS IN THE MIDDLE, NOT AT AN EDGE.
+  A phone is closed with a thumb, and a thumb is already near the top right corner. A Mac is
+  closed with a pointer that starts wherever it was left, and the shortest average distance to
+  anywhere on a wide screen is the centre. The two platforms want opposite things and this is the
+  web one.
+*/
+.closebar{display:flex;justify-content:center;margin:6px 0 10px}
+.closebar button{min-width:120px}
 .help{color:var(--dim);font-size:10px;margin-top:24px}
 .help b{color:#cbd5e1;font-weight:normal;display:block;margin-top:8px}
 .chip{display:inline-block;border:1px solid var(--edge);padding:4px 7px;margin:0 4px 4px 0;
@@ -140,6 +149,24 @@ function paint(cv, c, i){
   }
 }
 function getVar(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+
+/*
+  REPAINT THE CANVASES, TOUCH NOTHING ELSE.
+
+  draw() rebuilds the grid's innerHTML, which is right when the set changes and catastrophic sixty
+  times a second: every frame replaced the element under the pointer, so a click was released on a
+  node that had already been thrown away. That is why a loop could be started and not stopped.
+  Only the pixels move now, and the elements the mouse is aiming at stay where they are.
+*/
+function repaint(){
+  const L = layout(), from = S.page * L.per;
+  document.querySelectorAll("#grid .cell").forEach((el, k) => {
+    const i = from + k;
+    const c = S.cells[i];
+    if (c) paint(el.querySelector("canvas"), c, i);
+  });
+  if (ed && $("#big")) paintBig();
+}
 
 /* ───────────────────────────────────────────── the press rule, one place ── */
 /* One gesture, two meanings, and the mode is the only thing between a seek and an overwrite.
@@ -283,7 +310,7 @@ async function play(i, looping){
     if (S.playing !== i) return;
     const t = (ctx().currentTime - started) % span;
     S.playFrom = Math.min(1, t / span);
-    draw();
+    repaint();
     raf = requestAnimationFrame(tick);
   })();
 }
@@ -327,40 +354,156 @@ function bar(){
 function screen(title, html, help){
   const s = $("#screen");
   s.className = "on";
-  s.innerHTML = `<button class="close" onclick="closeScreen()">×</button><h2>${title}</h2>` +
-                html + (help ? `<div class="help"><b>WHAT THESE DO</b>${help}</div>` : "");
+  s.innerHTML = `<h2>${title}</h2>` + html +
+                (help ? `<div class="help"><b>WHAT THESE DO</b>${help}</div>` : "") +
+                `<div class="closebar"><button onclick="closeScreen()">× close</button></div>`;
 }
 function closeScreen(){ $("#screen").className = ""; refresh(); }
 window.closeScreen = closeScreen;
 
+/*
+  ONE PAGE FOR A CELL, WITH THE EDITOR AT THE TOP OF IT.
+
+  It used to be a menu of seven buttons, one of which opened the editor on a screen of its own.
+  Nine times in ten the thing wanted was the editor, so the common case cost two clicks and a
+  screen change and the rare cases cost one. Now the waveform IS the page: it is the first thing
+  under the title, the points are set on it directly, and transcribing, voices and the rest sit
+  underneath where they can be reached without going anywhere.
+
+  It also removes a whole screen. Two screens meant two closes, two places for the playhead to be
+  drawn, and a state that had to be carried between them.
+*/
+let ed = null;
+
 async function openCell(i){
   const c = S.cells[i];
+  ed = {i, inMs: c.inMs, outMs: c.outMs || c.lengthMs, zoom: null};
   screen("Cell " + String(i+1).padStart(2,"0"),
-    (c.words ? `<div style="color:var(--label);margin-bottom:8px">${escapeHtml(c.words)}</div>` : "") +
-    `<div class="row"><button style="flex:2" onclick="editor(${i})">Edit playback points</button>
-     <button style="flex:1" onclick="loopFlag(${i})">${c.loop ? "∞ on" : "∞"}</button></div>
-     <div style="height:6px"></div>
-     <button style="width:100%" onclick="transcribe(${i})">Transcribe</button>
-     <div style="height:6px"></div>
-     <button style="width:100%" onclick="readText(${i})">Read a text file aloud</button>
-     <div style="height:6px"></div>
-     <div class="row"><button style="flex:1" onclick="chooser(${i},'speechify')">Speechify</button>
-     <button style="flex:1" onclick="chooser(${i},'hume')">Hume</button></div>
-     <div style="height:6px"></div>
-     <button style="width:100%" onclick="revert(${i})">Play my own recording again</button>
-     <div style="height:16px"></div>
-     <button style="width:100%;border-color:var(--red)" onclick="del(${i})">Delete this recording</button>`,
-    `<b>Edit playback points</b>Drag the handles. Nothing is cut: the points are two numbers
-     beside the recording and the audio is untouched.
+    `<canvas id="big"></canvas>
+     <div style="margin:6px 0;font-size:10px">
+       <span style="color:var(--amber)">▌left click = in</span>
+       <span style="color:var(--red);margin-left:14px">▌right click = out</span></div>
+     <div id="edread" style="color:var(--label)"></div>
+     <div class="row" style="margin-top:8px">
+       <button style="flex:2;background:var(--amber);color:#000" onclick="edPlay()">Play</button>
+       <button style="flex:1" onclick="edZoom()">Zoom</button>
+       <button style="flex:1" onclick="loopFlag(${i})">${c.loop ? "∞ on" : "∞"}</button></div>
+
+     ${c.words ? `<div style="color:var(--label);margin:12px 0">${escapeHtml(c.words)}</div>` : ""}
+
+     <div class="row" style="margin-top:12px">
+       <button style="flex:1" onclick="transcribe(${i})">Transcribe</button>
+       <button style="flex:1" onclick="readText(${i})">Read a text file</button></div>
+     <div class="row" style="margin-top:6px">
+       <button style="flex:1" onclick="chooser(${i},'speechify')">Speechify</button>
+       <button style="flex:1" onclick="chooser(${i},'hume')">Hume</button></div>
+     <div class="row" style="margin-top:6px">
+       <button style="flex:1" onclick="revert(${i})">Play my own recording again</button>
+       <button style="flex:1;border-color:var(--red)" onclick="del(${i})">Delete</button></div>`,
+    `<b>The waveform</b>Left click sets the start, right click sets the stop. No dragging: a
+     mouse can put a point exactly where the pointer already is, and a drag is two events and a
+     chance to slip. Nothing is cut either way — the points are two numbers beside the recording
+     and the audio is untouched.
+     <b>Play</b>Plays between the points, once, with the mark running between them.
+     <b>Zoom</b>Shows only the part between the points with a little either side, so half a second
+     of breath is something a pointer can land on. Press again for the whole recording.
      <b>∞</b>A flag, not a start button. A marked cell carries ∞ on the grid; in play mode one
-     press starts it looping and the next stops it, with no gap at the join.
+     click starts it looping and the next stops it, with no gap at the join.
      <b>Transcribe</b>The words become the cell's text, exactly as spoken.
-     <b>Read a text file aloud</b>The other direction: hand it a file and a voice reads it. If
-     this cell has no voice yet, pick one first.
-     <b>Speechify / Hume</b>Opens the voice chooser for that engine.
+     <b>Read a text file</b>The other direction: hand it a file and a voice reads it. If this cell
+     has no voice yet, pick one first.
      <b>Delete</b>There is no undo, and there is not meant to be one.`);
+
+  const cv = $("#big");
+
+  /*
+    LEFT CLICK IS THE IN POINT, RIGHT CLICK IS THE OUT POINT.
+
+    Dragging was carried over from the phone, where a finger has nothing else to offer. A mouse
+    has two buttons and lands exactly where it is pointing, so a click puts a point precisely
+    where it is wanted with no travel, no press-and-hold, and no chance of slipping off the
+    canvas mid-gesture and leaving a handle somewhere nobody asked for.
+  */
+  cv.onclick = e => setPoint(e, true);
+  cv.oncontextmenu = e => { e.preventDefault(); setPoint(e, false); };
+  paintBig();
 }
 window.openCell = openCell;
+
+function setPoint(e, isIn){
+  const c = S.cells[ed.i];
+  const r = e.currentTarget.getBoundingClientRect();
+  const win = ed.zoom || [0, c.lengthMs || 1];
+  const ms = Math.round(win[0] + ((e.clientX - r.left)/r.width) * (win[1]-win[0]));
+  // A hundred and twenty milliseconds apart at the least: below that a cell plays as a click
+  // rather than a word, and the two handles land on the same pixel.
+  if (isIn) ed.inMs = Math.max(0, Math.min(ms, ed.outMs - 120));
+  else      ed.outMs = Math.min(c.lengthMs, Math.max(ms, ed.inMs + 120));
+  paintBig();
+  save();
+}
+
+function paintBig(){
+  const c = S.cells[ed.i], cv = $("#big");
+  if (!cv) return;
+  const w = cv.clientWidth, h = 180;
+  cv.width = w*devicePixelRatio; cv.height = h*devicePixelRatio;
+  const x = cv.getContext("2d"); x.scale(devicePixelRatio, devicePixelRatio);
+  x.clearRect(0,0,w,h);
+  const win = ed.zoom || [0, c.lengthMs || 1];
+  const span = Math.max(1, win[1]-win[0]);
+  const wf = c.waveform || [];
+  const first = Math.floor(wf.length * win[0] / (c.lengthMs||1));
+  const last = Math.max(first+1, Math.ceil(wf.length * win[1] / (c.lengthMs||1)));
+  const shown = wf.slice(first, last);
+  const bw = w / Math.max(1, shown.length);
+  const xOf = ms => ((ms - win[0]) / span) * w;
+  const inX = xOf(ed.inMs), outX = xOf(ed.outMs);
+  shown.forEach((v,k) => {
+    const bh = Math.max(1, v*h*0.9), px = k*bw;
+    x.fillStyle = (px >= inX && px <= outX) ? getVar("--wave") : "#3f3f46";
+    x.fillRect(px, (h-bh)/2, Math.max(1,bw), bh);
+  });
+  x.fillStyle = getVar("--amber"); x.fillRect(Math.min(w-5,Math.max(0,inX)), 0, 5, h);
+  x.fillStyle = getVar("--red");   x.fillRect(Math.min(w-5,Math.max(0,outX-5)), 0, 5, h);
+
+  /*
+    THE PLAYHEAD, WHICH THE EDITOR DID NOT HAVE AT ALL.
+
+    The grid had one and this did not, which is the wrong way round: this is the screen built for
+    watching the sound and the picture together. It runs BETWEEN THE POINTS, because the player
+    sounds the region and reports a fraction of the region — drawn across the whole canvas it
+    would start at the left edge while the audio started at the in point.
+  */
+  if (S.playing === ed.i){
+    x.fillStyle = getVar("--head");
+    x.fillRect(inX + S.playFrom * (outX - inX), 0, 2, h);
+  }
+
+  $("#edread").textContent =
+    `in ${(ed.inMs/1000).toFixed(2)}s   out ${(ed.outMs/1000).toFixed(2)}s   ` +
+    `plays ${((ed.outMs-ed.inMs)/1000).toFixed(2)}s of ${((c.lengthMs||0)/1000).toFixed(2)}s`;
+}
+
+async function save(){
+  await api("/api/meta/" + ed.i, {method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({in: Math.round(ed.inMs), out: Math.round(ed.outMs)})});
+  const c = S.cells[ed.i]; c.inMs = Math.round(ed.inMs); c.outMs = Math.round(ed.outMs);
+}
+async function edPlay(){ await save(); play(ed.i); }
+window.edPlay = edPlay;
+
+function edZoom(){
+  if (ed.zoom) ed.zoom = null;
+  else {
+    // A margin either side, or both points land on the edges of the canvas with nowhere left to
+    // click outside them.
+    const m = Math.max(50, (ed.outMs - ed.inMs)/8);
+    ed.zoom = [Math.max(0, ed.inMs-m), Math.min(S.cells[ed.i].lengthMs, ed.outMs+m)];
+  }
+  paintBig();
+}
+window.edZoom = edZoom;
 
 async function transcribe(i){
   stage("transcribing…");
@@ -407,89 +550,6 @@ function readText(i){
   f.click();
 }
 window.readText = readText;
-
-/* ─────────────────────────────────────────────────────────────── editor ── */
-let ed = null;
-async function editor(i){
-  const c = S.cells[i];
-  ed = {i, inMs: c.inMs, outMs: c.outMs || c.lengthMs, zoom: null};
-  screen("Cell " + String(i+1).padStart(2,"0") + " — playback points",
-    `<canvas id="big"></canvas>
-     <div style="margin:6px 0"><span style="color:var(--amber)">▌yellow = in</span>
-     <span style="color:var(--red);margin-left:12px">▌red = out</span></div>
-     <div id="edread" style="color:var(--label)"></div>
-     <div class="row" style="margin-top:8px">
-       <button style="flex:1;background:var(--amber);color:#000" onclick="edPlay()">Play</button>
-       <button style="flex:1" onclick="edZoom()">Zoom to in / out</button></div>`,
-    `<b>The two handles</b>Drag from the LEFT half of the waveform to move the start, from the
-     RIGHT half to move the stop. The side you begin on decides which handle you have and it
-     does not change under the pointer.
-     <b>Play</b>Plays between the points, once.
-     <b>Zoom to in / out</b>Shows only the part between the points with a little either side.
-     Press again for the whole recording. Nothing is ever cut.`);
-  const cv = $("#big");
-  cv.onpointerdown = e => {
-    const r = cv.getBoundingClientRect();
-    ed.dragIn = (e.clientX - r.left) < r.width/2;
-    cv.setPointerCapture(e.pointerId);
-  };
-  cv.onpointermove = e => {
-    if (!cv.hasPointerCapture(e.pointerId)) return;
-    const r = cv.getBoundingClientRect();
-    const win = ed.zoom || [0, c.lengthMs];
-    const ms = win[0] + ((e.clientX - r.left)/r.width) * (win[1]-win[0]);
-    if (ed.dragIn) ed.inMs = Math.max(0, Math.min(ms, ed.outMs - 120));
-    else ed.outMs = Math.min(c.lengthMs, Math.max(ms, ed.inMs + 120));
-    paintBig();
-  };
-  cv.onpointerup = save;
-  paintBig();
-}
-window.editor = editor;
-
-function paintBig(){
-  const c = S.cells[ed.i], cv = $("#big");
-  const w = cv.clientWidth, h = 180;
-  cv.width = w*devicePixelRatio; cv.height = h*devicePixelRatio;
-  const x = cv.getContext("2d"); x.scale(devicePixelRatio, devicePixelRatio);
-  x.clearRect(0,0,w,h);
-  const win = ed.zoom || [0, c.lengthMs || 1];
-  const span = Math.max(1, win[1]-win[0]);
-  const wf = c.waveform || [];
-  const first = Math.floor(wf.length * win[0] / (c.lengthMs||1));
-  const last = Math.max(first+1, Math.ceil(wf.length * win[1] / (c.lengthMs||1)));
-  const shown = wf.slice(first, last);
-  const bw = w / Math.max(1, shown.length);
-  const xOf = ms => ((ms - win[0]) / span) * w;
-  const inX = xOf(ed.inMs), outX = xOf(ed.outMs);
-  shown.forEach((v,k) => {
-    const bh = Math.max(1, v*h*0.9), px = k*bw;
-    x.fillStyle = (px >= inX && px <= outX) ? getVar("--wave") : "#3f3f46";
-    x.fillRect(px, (h-bh)/2, Math.max(1,bw), bh);
-  });
-  x.fillStyle = getVar("--amber"); x.fillRect(Math.min(w-5,Math.max(0,inX)), 0, 5, h);
-  x.fillStyle = getVar("--red");   x.fillRect(Math.min(w-5,Math.max(0,outX-5)), 0, 5, h);
-  $("#edread").textContent =
-    `in ${(ed.inMs/1000).toFixed(2)}s   out ${(ed.outMs/1000).toFixed(2)}s   ` +
-    `plays ${((ed.outMs-ed.inMs)/1000).toFixed(2)}s of ${((c.lengthMs||0)/1000).toFixed(2)}s`;
-}
-
-async function save(){
-  await api("/api/meta/" + ed.i, {method:"POST", headers:{"Content-Type":"application/json"},
-    body: JSON.stringify({in: Math.round(ed.inMs), out: Math.round(ed.outMs)})});
-  const c = S.cells[ed.i]; c.inMs = Math.round(ed.inMs); c.outMs = Math.round(ed.outMs);
-}
-async function edPlay(){ await save(); play(ed.i); }
-window.edPlay = edPlay;
-function edZoom(){
-  if (ed.zoom) ed.zoom = null;
-  else {
-    const m = Math.max(50, (ed.outMs - ed.inMs)/8);
-    ed.zoom = [Math.max(0, ed.inMs-m), Math.min(S.cells[ed.i].lengthMs, ed.outMs+m)];
-  }
-  paintBig();
-}
-window.edZoom = edZoom;
 
 /* ───────────────────────────────────────────────────────── voice chooser ── */
 async function chooser(slot, engine){
@@ -647,22 +707,51 @@ async function settings(){
        <button style="flex:1" onclick="setPlayMode('continuous')">Continuous</button>
        <button style="flex:1" onclick="setPlayMode('single')">Single</button></div>
      <div style="color:var(--label);margin-top:10px">KEYS</div>
-     <div style="color:var(--dim);font-size:10px">${k.file}</div>
      <div style="font-size:10px;white-space:pre-line">${
        k.keys.length ? k.keys.map(r =>
          `${r.provider}${r.paired?" (pair)":""}  ${r.label||"—"}  ${r.masked}${r.dead?"  DEAD":""}`
-       ).join("\n") : "none yet"}</div>`,
+       ).join("\n") : "none yet"}</div>
+     <div style="height:6px"></div>
+     <button style="width:100%" onclick="importKeys()">Import keys from a file</button>`,
     `<b>Cells and pages</b>The cells fill the page: one on a page is the size of the page, two
      are halves. Raising the count adds cells at the end; lowering it hides them rather than
      deleting them.
      <b>Waveform detail</b>How finely each cell draws its shape. Higher is slower to open a page.
      <b>When a sample ends</b>Continuous plays on down the set. Single plays the cell you pressed
      and stops.
-     <b>Keys</b>Put the whole note in the file named above, one paste, prose and all — it is read
-     by the same parser as the phone. AssemblyAI transcribes and is required; Speechify and Hume
-     are the two engines and either is enough. Keys are never displayed.`);
+     <b>Import keys from a file</b>Pick the note you already have. The app parses it and writes
+     the file itself — you are never asked to create one or get its shape right. Keys are found by
+     SHAPE, so account names, dates, the word CANCELLED and pasted URLs are all fine and are never
+     mistaken for credentials; the line above each key is kept as its label. Importing the same
+     note twice adds nothing and says so. AssemblyAI transcribes and is required; Speechify and
+     Hume are the two engines and either is enough. Keys are never displayed anywhere.`);
 }
 window.settings = settings;
+/*
+  THE APP OWNS THE KEY FILE.
+
+  Settings used to print the path and leave Baba to create the file, paste into it and get its
+  shape right — which is asking somebody who dictates rather than types to do the parser's job by
+  hand. He picks the note he already has; this reads it, sorts every provider out of it, and
+  appends what is genuinely new.
+
+  IMPORTING THE SAME NOTE TWICE CHANGES NOTHING AND SAYS SO. Silently appearing to work is the
+  failure that looks identical to success and sends somebody looking for a bug in the ring.
+*/
+async function importKeys(){
+  const f = document.createElement("input");
+  f.type = "file"; f.accept = "text/*,.txt,.md,.csv";
+  f.onchange = async () => {
+    const text = await f.files[0].text();
+    const d = await (await fetch("/api/keys/import", {method:"POST",
+      headers:{"Content-Type":"application/json"}, body: JSON.stringify({text})})).json();
+    stage(d.why || (d.ok ? "imported" : "nothing imported"));
+    settings();
+  };
+  f.click();
+}
+window.importKeys = importKeys;
+
 const setCount = n => { S.count = Math.max(1, Math.min(300, S.count+n)); localStorage.count = S.count; refresh().then(settings); };
 const setPages = n => { S.pages = Math.max(1, Math.min(S.count, S.pages+n)); localStorage.pages = S.pages; settings(); draw(); };
 const setBuckets = n => { S.buckets = n; localStorage.buckets = n; refresh().then(settings); };

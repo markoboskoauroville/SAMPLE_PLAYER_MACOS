@@ -786,6 +786,73 @@ def read_text(slot):
     return jsonify({"ok": True, "words": words, "chars": len(words)})
 
 
+@app.route("/api/keys/import", methods=["POST"])
+def import_keys():
+    """
+    ONE FILE IN, EVERY PROVIDER SORTED OUT OF IT.
+
+    The same behaviour as `TTT_MINI/MaKeyImport.importAll`, and for the same reason: both the
+    setup and the key manager there used to ask which provider a file was for before reading it,
+    which is backwards — the parser already knows which key belongs where.
+
+    THE APP OWNS THE FILE. Baba should not be told to go and create `keys.txt` and get its shape
+    right; he picks the note he already has and this writes it. The file is created if it is not
+    there, and appended to if it is.
+
+    DUPLICATES ARE DROPPED AND SAID SO. Importing the same note twice changes nothing and reports
+    "nothing new" rather than silently appearing to work — which is the failure that looks
+    identical to success and sends somebody looking for a bug in the ring instead.
+
+    WHAT IS APPENDED IS THE KEY WITH ITS LABEL, not the whole file. Pasting the file wholesale
+    would carry its prose in, and the line above a key is how the parser learns the account name —
+    so a second copy of somebody else's heading could rename a key that was already here.
+    """
+    text = (request.get_json(force=True) or {}).get("text", "")
+    if not text.strip():
+        return jsonify({"ok": False, "why": "that file is empty"})
+
+    found = parse_keys(text)
+    if not found:
+        return jsonify({"ok": False, "why": "nothing key-shaped in that file"})
+
+    existing_text = ""
+    if os.path.isfile(KEYS_FILE):
+        existing_text = open(KEYS_FILE, encoding="utf-8", errors="replace").read()
+    have = {f["key"] for f in parse_keys(existing_text)}
+    # A Hume secret is not a key in its own right, so it is not in `have` — but importing the
+    # same pair twice must not append it twice either.
+    have |= {f["secret"] for f in parse_keys(existing_text) if f["secret"]}
+
+    blocks, counts = [], {}
+    for f in found:
+        if f["key"] in have:
+            continue
+        have.add(f["key"])
+        if f["secret"]:
+            have.add(f["secret"])
+            blocks.append("%s\nAPI key\n%s\nSecret key\n%s" %
+                          (f["label"] or "imported", f["key"], f["secret"]))
+        else:
+            blocks.append("%s\n%s" % (f["label"] or "imported", f["key"]))
+        counts[f["provider"]] = counts.get(f["provider"], 0) + 1
+
+    if not blocks:
+        return jsonify({"ok": True, "added": 0,
+                        "why": "Nothing new. Every key in that file is already here."})
+
+    # Written through a temporary file and moved. This file holds credentials and a half-written
+    # one is a ring with a key cut in half in the middle of it.
+    os.makedirs(APPDIR, exist_ok=True)
+    tmp = KEYS_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(existing_text.rstrip("\n") + "\n\n" if existing_text.strip() else "")
+        f.write("\n\n".join(blocks) + "\n")
+    os.replace(tmp, KEYS_FILE)
+
+    said = ", ".join("%s +%d" % (k, v) for k, v in sorted(counts.items()))
+    return jsonify({"ok": True, "added": sum(counts.values()), "why": "Imported: " + said})
+
+
 @app.route("/api/keys")
 def keys():
     if not os.path.isfile(KEYS_FILE):
