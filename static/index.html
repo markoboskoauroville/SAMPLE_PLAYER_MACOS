@@ -105,6 +105,9 @@ const S = {
   // Which cells are generating right now. A set rather than a single value: nothing stops two
   // being asked for at once, and a single value would leave the first one spinning for ever.
   working: new Set(),
+  // What the person asked for before they were sent to choose a voice. Carried across the
+  // chooser and the card so the original press is the only press.
+  pending: null,
 };
 const $ = s => document.querySelector(s);
 const api = (p, o) => fetch(p + (p.includes("?") ? "&" : "?") + "project=" + S.project, o);
@@ -654,7 +657,7 @@ async function openCell(i){
      <div class="row" style="margin-top:6px">
        <button style="flex:2;background:var(--amber);color:#000"
                onclick="performText(${i})">Perform this text</button>
-       <button style="flex:1" onclick="renderDownload('${c.voice || ""}','${c.voiceId ? c.voiceId.split("/")[1] : ""}','',this)">⤓ Download</button>
+       <button style="flex:1" onclick="renderDownload('${c.voice || ""}','${c.voiceId ? c.voiceId.split("/")[1] : ""}','',this,${i})">⤓ Download</button>
        <button style="flex:1" onclick="transcribe(${i})">Transcribe</button>
        <button style="flex:1" onclick="readText(${i})">Open a file</button></div>
      <div class="row" style="margin-top:6px">
@@ -1033,12 +1036,33 @@ function selectVoices(voices, q, filters){
       a.name.localeCompare(b.name));
 }
 
+/*
+  THE TWO ENGINES, ASKED FOR PLAINLY.
+
+  Not a guess. Either may be the one with keys, they sound nothing alike, and choosing for
+  somebody is how an app ends up with one voice used for everything because it was the default.
+*/
+function pickEngine(slot, why){
+  screen("Which voice " + (why || ""),
+    `<div class="row" style="margin-top:10px">
+       <button style="flex:1" onclick="chooser(${slot},'speechify')">Speechify</button>
+       <button style="flex:1" onclick="chooser(${slot},'hume')">Hume</button></div>
+     <div style="color:var(--dim);font-size:10px;margin-top:8px">
+       Speechify answers in about a second and has 992 voices. Hume takes about twelve and reads
+       emotion tags. Either one is enough; whichever you have a key for is the one that works.</div>`,
+    `<b>Why you are here</b>The line is saved on the cell already, so nothing is lost by choosing.
+     Pick an engine, then a voice, and the thing you pressed will finish on its own.`);
+}
+window.pickEngine = pickEngine;
+
 async function chooser(slot, engine){
   S.engine = engine;
   S.slot = slot;
   S.filters = {};
   S.openFacet = null;
-  screen(engine === "hume" ? "Hume voices" : "Speechify voices",
+  const finishing = S.pending && S.pending.action === "download";
+  screen((engine === "hume" ? "Hume voices" : "Speechify voices") +
+         (finishing ? "  —  pick one and it downloads" : ""),
     `<input id="q" type="search" placeholder="find — try: brit female, or meditation">
      <div id="facets" style="margin:8px 0"></div>
      <div id="vcount" style="color:var(--dim);margin-bottom:6px"></div>
@@ -1054,6 +1078,8 @@ async function chooser(slot, engine){
      <b>✦</b>The flagship set: Speechify's newest model carries only those eight and answers 400
      for every other voice. Hume publishes no popularity of any kind, so nothing there is marked.`);
 
+  // Rendered after the catalogue arrives, so the ⤓ use buttons appear on every row when a
+  // download is waiting rather than only after the next keystroke in the search box.
   const d = await busy("fetching the " + engine + " catalogue…",
     async () => (await fetch("/api/voices/" + engine + (S.refreshCat ? "?refresh=1" : ""))).json());
   S.refreshCat = false;
@@ -1167,6 +1193,10 @@ function renderVoices(){
       </div>
       <button style="padding:6px 10px" title="hear this voice say its own name"
               onclick="hearRow('${v.engine}','${v.id}')">▶</button>
+      ${S.pending && S.pending.action === "download"
+        ? `<button style="padding:6px 10px;background:var(--amber);color:#000"
+                   onclick="resumePending('${v.engine}','${v.id}',this)">⤓ use</button>`
+        : ""}
       <button style="padding:6px 10px"
               onclick="card(${S.slot},'${v.engine}','${v.id}')">open</button>
     </div>`;
@@ -1260,7 +1290,11 @@ const EMOTIONS = [
 function card(slot, engine, id){
   const v = S.voices.find(x => x.engine===engine && x.id===id);
   const star = S.stars.has(key(v));
+  S.slot = slot;
   const words = (S.cells[slot] && S.cells[slot].words) || "";
+  // If a download was asked for before there was a voice, say so at the top of the card rather
+  // than leaving the person to work out why they are here.
+  const waiting = S.pending && S.pending.action === "download";
   screen(escapeHtml(v.name),
     `<div style="font-size:20px" class="${(v.gender||"").toLowerCase()}">${escapeHtml(v.name)}
        <span onclick="star('${key(v)}')" style="cursor:pointer">${star?"★":"☆"}</span></div>
@@ -1274,7 +1308,8 @@ function card(slot, engine, id){
      <div class="row" style="margin:6px 0">
        <button style="flex:1" onclick="saveLine(${slot})">Save the line</button>
        <button style="flex:1" onclick="hearLine(${slot},'${engine}','${id}')">Hear the line</button>
-       <button style="flex:1" onclick="renderDownload('${engine}','${id}','',this)">⤓ Download</button>
+       <button style="flex:1${waiting ? ";background:var(--amber);color:#000" : ""}"
+               onclick="renderDownload('${engine}','${id}','',this,${slot})">⤓ Download</button>
        <button style="flex:1;background:var(--amber);color:#000"
                onclick="use(${slot},'${engine}','${id}')">Use this voice</button></div>
 
@@ -1396,11 +1431,30 @@ window.dropEmotion = dropEmotion;
 
   It goes through the same cache as the audition, so pressing this after hearing it costs nothing.
 */
-async function renderDownload(engine, id, direction, btn){
+async function renderDownload(engine, id, direction, btn, slot){
   const box = $("#celltext");
   const line = box ? box.value.trim() : "";
   if (!line) return stage("nothing in the box to render");
-  if (!engine || !id) return stage("pick a voice first");
+
+  /*
+    WHAT IS MISSING IS ASKED FOR, NOT REPORTED.
+
+    This said "pick a voice first" and stopped, which leaves the person holding a line, a button
+    that does nothing, and no route from one to the other. A message that names a missing thing
+    without offering it is a refusal wearing an explanation.
+
+    So: the line is saved first — nothing pasted is ever lost to a detour — the intention is
+    remembered, and the engines are offered. Choosing one leads to the chooser, choosing a voice
+    there leads to the card, and the card finishes the download that was asked for two screens
+    ago. The person presses Download once.
+  */
+  if (!engine || !id){
+    const at = (slot === undefined || slot === null) ? S.slot : slot;
+    if (at === undefined || at === null) return stage("no cell to work on");
+    await saveLine(at);
+    S.pending = {action: "download", slot: at};
+    return pickEngine(at, "to read that line");
+  }
   const v = (S.voices || []).find(x => x.engine === engine && x.id === id);
 
   /*
@@ -1462,6 +1516,35 @@ async function saveLine(slot){
   stage(d.chars + " characters saved to cell " + (slot+1));
 }
 window.saveLine = saveLine;
+
+/*
+  FINISH WHAT WAS ASKED FOR TWO SCREENS AGO.
+
+  Called when a voice has just been chosen. If the person pressed Download before they had one,
+  this is where that press lands — not as a second thing to do, but as the same one arriving late.
+*/
+async function resumePending(engine, id, btn){
+  const p = S.pending;
+  if (!p) return false;
+  S.pending = null;
+  if (p.action === "download"){
+    // The line lives on the cell, not in a box on this screen, because the chooser has no box.
+    // Put it where renderDownload reads from, then take it away again — a hidden field is the
+    // honest way to say "this screen is finishing something that started on another one".
+    const carrier = document.createElement("textarea");
+    carrier.id = "celltext";
+    carrier.style.display = "none";
+    carrier.value = (S.cells[p.slot] && S.cells[p.slot].words) || "";
+    document.body.appendChild(carrier);
+    try {
+      await renderDownload(engine, id, "", btn, p.slot);
+    } finally {
+      carrier.remove();
+    }
+    return true;
+  }
+  return false;
+}
 
 async function hearLine(slot, engine, id){
   const box = $("#celltext");

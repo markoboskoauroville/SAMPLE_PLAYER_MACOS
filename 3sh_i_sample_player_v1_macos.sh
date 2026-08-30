@@ -1,6 +1,6 @@
 #!/bin/bash
 # ---------------------------------------------------------------------------
-# SAMPLE PLAYER — installer for macOS                        edition: v2.2
+# SAMPLE PLAYER — installer for macOS                        edition: v2.3
 #
 # repo: SAMPLE_PLAYER_MACOS
 #
