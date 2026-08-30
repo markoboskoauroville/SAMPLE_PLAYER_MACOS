@@ -827,21 +827,71 @@ function renderVoices(){
   $("#vcount").textContent = list.length + " of " + S.voices.length;
   // Four hundred rows is already more than anybody scrolls; past that the answer is another chip,
   // not more scrolling, and saying so is more useful than rendering it.
+  // EVERY ROW CARRIES ITS OWN PLAY. Auditioning is the whole reason to be on this screen, and
+  // opening a card to hear one voice and closing it again is two clicks and a screen change per
+  // candidate — which at a hundred candidates is why nobody auditions and everybody takes the
+  // first name they recognise.
+  //
+  // Two explicit buttons rather than a clickable row: a row that opens a card AND holds a play
+  // button is a row where half of it does one thing and half does another with nothing saying
+  // which half is which.
   $("#vlist").innerHTML = list.slice(0, 400).map(v => {
     const g = (v.gender || "").toLowerCase();
     const facets = [v.gender, v.age, v.language, v.accent].filter(Boolean).join(" · ");
     const extra = (v.tags || [])
       .filter(t => /^(use-case|timbre|style):/.test(t))
       .map(t => t.split(":")[1]).slice(0, 6).join("  ");
-    return `<div class="vrow" onclick="card(${S.slot},'${v.engine}','${v.id}')">
-      <span class="${g === "male" ? "male" : g === "female" ? "female" : ""}">${escapeHtml(v.name)}</span>
-      ${S.stars.has(key(v)) ? " ★" : ""}${v.flagship ? " ✦" : ""}
-      <div style="color:var(--label);font-size:10px">${facets}</div>
-      ${extra ? `<div style="color:var(--dim);font-size:9px">${extra}</div>` : ""}</div>`;
+    const k = key(v);
+    return `<div class="vrow" style="display:flex;align-items:center;gap:6px;cursor:default">
+      <div style="flex:1;min-width:0">
+        <span class="${g === "male" ? "male" : g === "female" ? "female" : ""}">${escapeHtml(v.name)}</span>
+        ${S.stars.has(k) ? " ★" : ""}${v.flagship ? " ✦" : ""}
+        <div style="color:var(--label);font-size:10px">${facets}</div>
+        ${extra ? `<div style="color:var(--dim);font-size:9px">${extra}</div>` : ""}
+      </div>
+      <button style="padding:6px 10px" title="hear this voice say its own name"
+              onclick="hearRow('${v.engine}','${v.id}')">▶</button>
+      <button style="padding:6px 10px"
+              onclick="card(${S.slot},'${v.engine}','${v.id}')">open</button>
+    </div>`;
   }).join("") + (list.length > 400
     ? `<div style="color:var(--dim);padding:8px">…and ${list.length - 400} more. Narrow it with a chip rather than scrolling.</div>`
     : "");
 }
+/*
+  ONE AUDITION AT A TIME.
+
+  Clicking down a list of a hundred voices means a hundred previews started in a few seconds, and
+  without a single handle to stop the last one they overlap into noise — which sounds like the
+  app being broken rather than like the person being quick.
+
+  SPEECHIFY IS FREE AND INSTANT: it publishes a preview clip on its own CDN, so nothing is
+  generated and nothing is billed. HUME PUBLISHES NONE, so its preview is a real call that says
+  the voice's own name — short on purpose, because Hume paces at about twelve seconds and a full
+  sentence would make ten auditions two minutes of waiting.
+*/
+let audition = null;
+
+async function hearRow(engine, id){
+  const v = S.voices.find(x => x.engine === engine && x.id === id);
+  if (!v) return;
+  if (audition){ audition.pause(); audition = null; }
+  if (v.preview){
+    audition = new Audio(v.preview);
+    audition.play();
+    return;
+  }
+  stage("hearing " + v.name + "…");
+  const d = await (await fetch("/api/preview", {method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({engine, voiceId: id, model: v.model, name: v.name})})).json();
+  if (!d.ok) return stage(d.why);
+  stage("");
+  audition = new Audio("data:audio/wav;base64," + d.wav);
+  audition.play();
+}
+window.hearRow = hearRow;
+
 function key(v){ return v.engine + "/" + v.id; }
 
 const EMOTIONS = [
