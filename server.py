@@ -61,6 +61,17 @@ MAX_TEXT = 2000
 
 app = Flask(__name__, static_folder=None)
 
+# THE SERVER DOES NOT NARRATE.
+#
+# Flask's development server prints a line for every request, and this app asks for state after
+# every recording and repaints on every keystroke — so within a minute of use the terminal is a
+# column of 200s scrolling past the one thing worth reading, which is the address.
+#
+# Silenced at ERROR rather than turned off entirely: a crash is exactly the thing that should
+# still reach the screen, and it is the only thing left that will.
+import logging
+logging.getLogger("werkzeug").setLevel(logging.ERROR)
+
 
 # ─────────────────────────────────────────────────────────────────────── paths ──
 #
@@ -898,4 +909,8 @@ if __name__ == "__main__":
     with open(PORT_FILE, "w") as f:
         f.write(str(port))
     print("sample player on http://127.0.0.1:%d" % port, file=sys.stderr)
-    app.run(host=HOST, port=port, threaded=True)
+    # The banner is the launcher's job. Two panels saying the same thing, one of them wrapped in
+    # asterisks warning about a development server, is one panel too many.
+    import flask.cli
+    flask.cli.show_server_banner = lambda *a, **k: None
+    app.run(host=HOST, port=port, threaded=True, debug=False)

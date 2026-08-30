@@ -1,6 +1,6 @@
 #!/bin/bash
 # ---------------------------------------------------------------------------
-# SAMPLE PLAYER — installer for macOS                        edition: v1.2
+# SAMPLE PLAYER — installer for macOS                        edition: v1.3
 #
 # repo: SAMPLE_PLAYER_MACOS
 #
@@ -207,20 +207,45 @@ fi
 # fails at a different place every time.
 cat > "$BIN/sampleplayer.new" << 'LAUNCHEOF'
 #!/bin/bash
+# The launcher. It runs the server, shows a small status panel, and waits on a
+# key — it does not tail a log.
+#
+# WHY THE SERVER IS SILENT
+#
+# Flask's development server prints a line for every request, and this app polls
+# state after every recording and repaints on every keystroke. The terminal
+# filled with 200s within a minute of use, which is a window doing nothing
+# except scrolling past the one thing worth reading, which is the address. The
+# access log is turned off in the server itself and werkzeug's logger is set to
+# ERROR, so what remains on screen is a crash — the only thing worth showing.
 APPDIR="$HOME/.sampleplayer-web"
 PORTFILE="$APPDIR/port.txt"
+LOG="$APPDIR/server.log"
 
 DIMC=$'\033[38;5;245m'; KEYC=$'\033[1;38;5;222m'; OFFC=$'\033[0m'
-WHTC=$'\033[38;5;252m'; GRNC=$'\033[38;5;114m'
+WHTC=$'\033[38;5;252m'; GRNC=$'\033[38;5;114m'; REDC=$'\033[38;5;203m'
+AMBC=$'\033[38;5;214m'
 ruleC(){ printf '   %s%s%s\n' "$DIMC" "------------------------------------------" "$OFFC"; }
 
 # The Mac must not sleep while a take is being recorded, and must be allowed to
 # the moment this exits. -w on our own pid ties the two together.
 caffeinate -dimsu -w $$ >/dev/null 2>&1 &
+CAFF=$!
 
-cleanup(){
-  [ -n "$SRV" ] && kill "$SRV" 2>/dev/null
+# THE TERMINAL IS PUT INTO SINGLE-KEY MODE AND MUST BE PUT BACK.
+# A shell left with echo off after a crash looks like a broken machine, so the
+# restore is on every exit path there is, not just the clean one.
+TTY_SAVED=""
+[ -t 0 ] && TTY_SAVED="$(stty -g 2>/dev/null || true)"
+tty_restore(){
+  [ -n "$TTY_SAVED" ] && stty "$TTY_SAVED" 2>/dev/null || true
+  [ -t 0 ] && stty echo 2>/dev/null || true
   printf '\033[?25h'
+}
+cleanup(){
+  tty_restore
+  [ -n "$SRV" ]  && kill "$SRV"  2>/dev/null
+  [ -n "$CAFF" ] && kill "$CAFF" 2>/dev/null
 }
 trap 'cleanup' EXIT
 trap 'cleanup; exit 130' INT
@@ -228,45 +253,102 @@ trap 'cleanup; exit 143' TERM
 trap 'cleanup; exit 129' HUP
 
 rm -f "$PORTFILE"
-"$APPDIR/venv/bin/python" "$APPDIR/server.py" &
+"$APPDIR/venv/bin/python" "$APPDIR/server.py" >"$LOG" 2>&1 &
 SRV=$!
 
-# WAIT FOR THE PORTFILE RATHER THAN SLEEPING. The server picks the first free
+# WAIT FOR THE PORTFILE RATHER THAN SLEEPING. The server takes the first free
 # port at or above 8084, because several of these run at once and a fixed port
 # means one of them silently loses. Opening the browser on a guess opens it on
 # somebody else's app.
 PORT=""
 for i in $(seq 1 60); do
-  [ -f "$PORTFILE" ] && PORT="$(cat "$PORTFILE")" && break
+  [ -s "$PORTFILE" ] && PORT="$(cat "$PORTFILE")" && break
+  kill -0 "$SRV" 2>/dev/null || break
   sleep 0.25
 done
 if [ -z "$PORT" ]; then
-  echo "   the server did not come up"
+  printf '\n   %sthe server did not come up%s\n' "$REDC" "$OFFC"
+  printf '   %slast lines of %s:%s\n' "$DIMC" "$LOG" "$OFFC"
+  tail -n 12 "$LOG" 2>/dev/null | sed 's/^/     /'
   exit 1
 fi
-
 URL="http://127.0.0.1:$PORT"
-echo ""
-printf '   %sSAMPLE PLAYER%s  %sserver%s\n' "$KEYC" "$OFFC" "$DIMC" "$OFFC"
-ruleC
-printf '    %s%-14s%s %s%s%s\n' "$DIMC" "here" "$OFFC" "$WHTC" "$URL" "$OFFC"
-printf '    %s%-14s%s %s%s%s\n' "$DIMC" "data" "$OFFC" "$DIMC" "$APPDIR/data" "$OFFC"
-printf '    %s%-14s%s %s%s%s\n' "$DIMC" "keys" "$OFFC" "$DIMC" "$APPDIR/keys.txt" "$OFFC"
-ruleC
-printf '    %sspace%s      stop this cell, start the next\n' "$KEYC" "$OFFC"
-printf '    %sm%s          swap REC and PLAY\n' "$KEYC" "$OFFC"
-printf '    %sarrows%s     flip the page\n' "$KEYC" "$OFFC"
-printf '    %sesc%s        stop everything\n' "$KEYC" "$OFFC"
-printf '    %sright-click%s  a cell opens its menu\n' "$KEYC" "$OFFC"
-ruleC
-printf '    %sctrl-c%s to stop the server\n\n' "$DIMC" "$OFFC"
+
+lan_ip(){
+  for i in en0 en1 en2; do
+    a="$(ipconfig getifaddr "$i" 2>/dev/null)"
+    [ -n "$a" ] && { echo "$a"; return 0; }
+  done
+  return 0
+}
+
+cells(){
+  find "$APPDIR/data" -name original.wav 2>/dev/null | wc -l | tr -d ' '
+}
+disk(){
+  du -sh "$APPDIR/data" 2>/dev/null | cut -f1
+}
+keycount(){
+  [ -f "$APPDIR/keys.txt" ] || { echo 0; return; }
+  grep -cE '(sk_|gsk_|sk-ant-|AIza|[0-9a-f]{32})' "$APPDIR/keys.txt" 2>/dev/null || echo 0
+}
+
+show_head(){
+  clear 2>/dev/null || true
+  IP="$(lan_ip)"
+  printf '\n   %s███████╗██████╗ %s  %sSAMPLE PLAYER%s\n' "$AMBC" "$OFFC" "$KEYC" "$OFFC"
+  printf '   %s██╔════╝██╔══██╗%s  %sserver running%s\n' "$AMBC" "$OFFC" "$DIMC" "$OFFC"
+  printf '   %s███████╗██████╔╝%s\n' "$AMBC" "$OFFC"
+  printf '   %s╚════██║██╔═══╝ %s  %s%s%s\n' "$AMBC" "$OFFC" "$WHTC" "$URL" "$OFFC"
+  printf '   %s███████║██║     %s\n' "$AMBC" "$OFFC"
+  printf '   %s╚══════╝╚═╝     %s\n\n' "$AMBC" "$OFFC"
+  ruleC
+  printf '    %s%-12s%s %s%s recorded%s   %s%s on disk%s   %s%s keys%s\n' \
+    "$DIMC" "state" "$OFFC" "$GRNC" "$(cells)" "$OFFC" \
+    "$WHTC" "$(disk)" "$OFFC" "$WHTC" "$(keycount)" "$OFFC"
+  [ -n "$IP" ] && printf '    %s%-12s%s %shttp://%s:%s%s\n' \
+    "$DIMC" "on the wifi" "$OFFC" "$DIMC" "$IP" "$PORT" "$OFFC"
+  printf '    %s%-12s%s %s%s%s\n' "$DIMC" "data" "$OFFC" "$DIMC" "$APPDIR/data" "$OFFC"
+  printf '    %s%-12s%s %s%s%s\n' "$DIMC" "keys" "$OFFC" "$DIMC" "$APPDIR/keys.txt" "$OFFC"
+  ruleC
+  printf '    %so%s  open it in Chrome        %sr%s  refresh this panel\n' \
+    "$KEYC" "$OFFC" "$KEYC" "$OFFC"
+  printf '    %sa%s  open in the default one  %sl%s  the last of the log\n' \
+    "$KEYC" "$OFFC" "$KEYC" "$OFFC"
+  printf '    %sf%s  the data folder in Finder %sq%s  stop the server\n' \
+    "$KEYC" "$OFFC" "$KEYC" "$OFFC"
+  ruleC
+  printf '\n'
+}
+
+open_url(){ open -a "Google Chrome" "$1" >/dev/null 2>&1 || open "$1" >/dev/null 2>&1; }
 
 # CHROME BY PREFERENCE. Safari asks for the microphone once per page load and
 # forgets; Chrome remembers the grant for 127.0.0.1, which matters in an app
-# whose whole loop is press, speak, press.
-open -a "Google Chrome" "$URL" >/dev/null 2>&1 || open "$URL" >/dev/null 2>&1
+# whose whole loop is click, speak, click.
+open_url "$URL"
+show_head
 
-wait "$SRV"
+if [ -t 0 ]; then
+  # A ONE SECOND READ RATHER THAN A BLOCKING ONE, so the panel notices when the
+  # server has died instead of waiting for a key that will never come.
+  while kill -0 "$SRV" 2>/dev/null; do
+    if IFS= read -rsn1 -t 1 K 2>/dev/null; then
+      case "$K" in
+        o|O) printf '   %sopening in Chrome%s\n' "$DIMC" "$OFFC"; open_url "$URL" ;;
+        a|A) printf '   %sopening in the default browser%s\n' "$DIMC" "$OFFC"; open "$URL" >/dev/null 2>&1 ;;
+        f|F) open "$APPDIR/data" >/dev/null 2>&1 ;;
+        l|L) printf '\n'; tail -n 15 "$LOG" 2>/dev/null | sed 's/^/     /'; printf '\n' ;;
+        r|R) show_head ;;
+        q|Q) break ;;
+      esac
+    fi
+  done
+  printf '\n   %sstopped%s\n\n' "$DIMC" "$OFFC"
+else
+  # Not a terminal — piped or launched from somewhere else. Just hold the server.
+  wait "$SRV"
+fi
 LAUNCHEOF
 chmod +x "$BIN/sampleplayer.new"
 mv "$BIN/sampleplayer.new" "$CMD"

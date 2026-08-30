@@ -46,7 +46,8 @@ h2{font-size:14px;font-weight:normal;margin:0 0 8px}
   anywhere on a wide screen is the centre. The two platforms want opposite things and this is the
   web one.
 */
-.closebar{display:flex;justify-content:center;margin:6px 0 10px}
+.closebar{display:flex;justify-content:center;margin:0 0 10px;
+           position:sticky;top:0;background:#000;padding:8px 0;z-index:2}
 .closebar button{min-width:120px}
 .help{color:var(--dim);font-size:10px;margin-top:24px}
 .help b{color:#cbd5e1;font-weight:normal;display:block;margin-top:8px}
@@ -354,9 +355,13 @@ function bar(){
 function screen(title, html, help){
   const s = $("#screen");
   s.className = "on";
-  s.innerHTML = `<h2>${title}</h2>` + html +
-                (help ? `<div class="help"><b>WHAT THESE DO</b>${help}</div>` : "") +
-                `<div class="closebar"><button onclick="closeScreen()">× close</button></div>`;
+  // THE CLOSE IS AT THE TOP, CENTRED. At the bottom it was centred and still wrong: a long
+  // screen put it below the fold, so leaving meant scrolling first — and the way out is the one
+  // control that must never have to be looked for. At the top it is in the same place whatever
+  // the screen is long enough to hold.
+  s.innerHTML = `<div class="closebar"><button onclick="closeScreen()">× close</button></div>` +
+                `<h2>${title}</h2>` + html +
+                (help ? `<div class="help"><b>WHAT THESE DO</b>${help}</div>` : "");
 }
 function closeScreen(){ $("#screen").className = ""; refresh(); }
 window.closeScreen = closeScreen;
