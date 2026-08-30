@@ -139,3 +139,59 @@ builds, any network call from this machine, the editor's drag, the loop, or the 
 
 That list is the first thing to work through, and the most likely place for it to fail first is the
 microphone: Chrome grants it to `127.0.0.1` without a certificate, and Safari does not always.
+
+---
+
+# THE TWO EDITIONS, COMPARED
+
+Written 30.8.2026, with the phone at v21 and the terminal at v2.5. The terminal edition was built
+in a day from twenty versions of the phone one, and then went past it in several places because a
+Mac makes some things cheap that a phone makes dear.
+
+**Both have:** the storage layout cell for cell, `original.wav` protected by the path, the quality
+check before normalisation, the 20 dB gain ceiling, the WAV chunk walker, one key per
+transcription job, a condemnation retrying on the next key, 403/1010 never condemning, the
+User-Agent in one place, the Speechify model derived from the voice id, both catalogues walked to
+the end, keys parsed by shape and never displayed, the faceted voice browser, per-cell loop flags,
+in and out points that cut nothing, and controls first with help in one block.
+
+## WHAT THE TERMINAL HAS AND THE PHONE DOES NOT
+
+| | Why it landed there first |
+|---|---|
+| **Inline emotion tags** `<angry>` mid-line, with Hume receiving the pieces as one request | A keyboard makes a tag cheap to type. It is the biggest gap and the one worth closing first |
+| **Custom emotions**, shared by every voice | Same reason: two text fields and a button |
+| **An editable line** on the cell page and the card, both writing to the same cell | The phone shows the transcript read-only, so a wrong word means re-recording |
+| **A cache** of catalogues and of every generated sound | The phone re-fetches 1152 voices on every open and re-bills every repeat |
+| **The remembered last voice** | The phone asks per cell |
+| **Render and download a line** without touching a cell | The phone can only save a cell's own recording |
+| **Download named after the transcript** | The phone's save uses the cell number |
+| **▶ on every row** of the voice list | The phone opens a card to hear one voice |
+| **Facet chips carrying counts** computed against the other filters | The phone's chips have no counts |
+| **A status line with a spinner that cannot be forgotten** | Every network call goes through one wrapper |
+| **A live three-second scope while recording** | The phone draws a live waveform already, but not a wrapping window |
+| **Check for updates** | *Closed in phone v21* |
+
+## WHAT THE PHONE HAS AND THE TERMINAL DOES NOT
+
+| | Why it stays there |
+|---|---|
+| **The overlay: hairline, triangle, status** | A phone shows one app at a time. A Mac shows the script and the app side by side, so the keyboard does what the triangle did |
+| **Recording from another app** | The same reason |
+| **The key test screen** — test, test all, delete | The parser, the ring and the classifier are all in the terminal already; only the screen is missing |
+| **Projects** | The terminal has one, `project-01`. The storage is per-project already, so this is a picker |
+| **234 test cases and 182 structural checks** | The terminal has 74 and 49, and its gates say plainly which two cannot run without a Mac |
+
+## THE ORDER THESE SHOULD BE CLOSED IN
+
+1. **The cache.** It costs money and time on every session and it is server-side logic that ports
+   directly. Nothing else on this list is spent in credits.
+2. **Inline emotion tags.** The largest behavioural difference, and the reason Hume is in the app.
+3. **The editable line.** A transcript with one wrong word currently means re-recording a take.
+4. **The remembered voice.** Turns a thirty-cell set from ninety presses into three.
+5. **Render and download.** The phone can already save a take; this is the same door for a line.
+6. Counts on the facet chips, and ▶ in the list.
+
+None of these is hard. They are listed rather than done because a list of five ports done badly in
+one sitting is worse than one done properly, and because writing them down is how they stop being
+things only one session remembers.
