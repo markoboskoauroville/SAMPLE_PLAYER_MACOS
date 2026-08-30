@@ -704,6 +704,7 @@ def state():
         gens = [os.path.splitext(x)[0] for x in os.listdir(gen_dir)] if os.path.isdir(gen_dir) else []
         wf = []
         ms = 0
+        rate = RATE
         if os.path.isfile(f):
             samples, rate = read_samples(f)
             wf = waveform(samples, buckets)
@@ -719,6 +720,9 @@ def state():
             "inMs": int(meta.get("in") or 0),
             "outMs": int(meta.get("out") or 0),
             "lengthMs": ms,
+            # Reported rather than assumed: a recording is 44.1 and an engine returns whatever it
+            # returns, and the cell page says which so nobody has to open the file to find out.
+            "rate": rate,
             "generated": gens,
             "waveform": wf,
         })
@@ -768,6 +772,55 @@ def audio(slot):
     if not os.path.isfile(f):
         return "", 404
     return send_from_directory(os.path.dirname(f), os.path.basename(f), mimetype="audio/wav")
+
+
+def slugify(text, fallback):
+    """
+    A FILENAME OUT OF WHAT WAS SAID.
+
+    The line is the only name that means anything: a folder of cell-01.wav through cell-30.wav is
+    thirty files nobody can tell apart in an edit, and the whole reason to download one is to drop
+    it on a timeline next to a picture.
+
+    What is stripped is what a filesystem or an edit suite will argue with — slashes, colons,
+    quotes, leading dots — and nothing else. Spaces are kept as spaces rather than turned into
+    underscores: this is going into Premiere and DaVinci, not into a URL, and a name that reads as
+    a sentence is the point.
+
+    Eighty characters, cut at a word. macOS allows 255 bytes and every one of them fits in a bin
+    that is already too wide to read at a glance.
+    """
+    t = " ".join((text or "").split())
+    t = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "", t)
+    t = t.strip(" .")
+    if not t:
+        return fallback
+    if len(t) > 80:
+        cut = t[:80]
+        space = cut.rfind(" ")
+        t = cut[:space] if space > 40 else cut
+    return t
+
+
+@app.route("/api/download/<int:slot>")
+def download(slot):
+    """
+    THE EXACT FILE THIS CELL PLAYS, uncompressed, under the name of what it says.
+
+    Not a re-encode and not a copy: the bytes on disk, which are 16-bit PCM in a WAV from end to
+    end. The browser records raw samples and writes the header itself at 44.1 kHz mono; both
+    engines are asked for `wav` rather than mp3. Nothing in this app has been through a lossy
+    codec, so there is nothing here to undo.
+    """
+    pid = request.args.get("project", "project-01")
+    f = playing_file(pid, slot)
+    if not os.path.isfile(f):
+        return "", 404
+    name = slugify(read_meta(pid, slot).get("words", ""), "cell-%02d" % (slot + 1)) + ".wav"
+    return send_from_directory(
+        os.path.dirname(f), os.path.basename(f),
+        mimetype="audio/wav", as_attachment=True, download_name=name,
+    )
 
 
 @app.route("/api/meta/<int:slot>", methods=["POST"])
@@ -864,8 +917,25 @@ def do_speak(slot):
     pid = request.args.get("project", "project-01")
     body = request.get_json(force=True) or {}
     words = body.get("text") or read_meta(pid, slot).get("words", "")
+
+    # TRANSCRIPTION IS NOT A STEP, IT HAPPENS ON THE WAY.
+    #
+    # THIS WAS DROPPED IN THE PORT AND IT IS THE POINT OF THE WHOLE FEATURE. Nobody wants a
+    # transcript; they want a different voice, and the transcript is what the app needs in order
+    # to give them one. The phone edition has never asked for it — v6 built it exactly this way
+    # and v11 kept it when Transcribe became an action of its own.
+    #
+    # Telling somebody "transcribe first" is the app knowing what has to happen next and refusing
+    # to do it.
     if not words.strip():
-        return jsonify({"ok": False, "why": "nothing to say — transcribe first"})
+        wav = original(pid, slot)
+        if not os.path.isfile(wav):
+            return jsonify({"ok": False, "why": "nothing recorded in that cell"})
+        text, why = transcribe(wav)
+        if text is None:
+            return jsonify({"ok": False, "why": "could not transcribe it: " + why})
+        write_meta(pid, slot, {"words": text})
+        words = text
     # THE SAME LINE IN THE SAME VOICE IS THE SAME AUDIO. Re-recording a cell clears its generated
     # files, and regenerating the same words afterwards used to bill for them again — which is the
     # commonest thing anybody does while deciding between two voices.

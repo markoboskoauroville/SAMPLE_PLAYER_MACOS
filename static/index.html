@@ -559,16 +559,35 @@ async function openCell(i){
        <button style="flex:1" onclick="edWhole()">Whole take</button>
        <button style="flex:1" onclick="loopFlag(${i})">${c.loop ? "∞ on" : "∞"}</button></div>
 
-     ${c.words ? `<div style="color:var(--label);margin:12px 0">${escapeHtml(c.words)}</div>` : ""}
+     <!--
+       THE TEXT IS EDITABLE, NOT DISPLAYED.
 
-     <div class="row" style="margin-top:12px">
+       It was a grey line of read-only text under the waveform, which meant three different things
+       could only arrive one way each: a transcript by transcribing, and a written line by finding
+       a file, saving it, and picking it. Pasting was not possible at all, and correcting a
+       transcript that got one word wrong meant re-recording the take.
+
+       It is one box now and every path writes into it. What is in the box IS the cell's line, so
+       Perform reads whatever is there — transcribed, opened from a file, pasted, or typed over.
+     -->
+     <textarea id="celltext" rows="3" placeholder="type or paste the line here, or transcribe it, or open a file"
+       style="width:100%;margin-top:12px;background:#000;border:1px solid #52525b;color:#fff;
+              font:inherit;padding:6px;resize:vertical">${escapeHtml(c.words || "")}</textarea>
+
+     <div class="row" style="margin-top:6px">
+       <button style="flex:2;background:var(--amber);color:#000"
+               onclick="performText(${i})">Perform this text</button>
        <button style="flex:1" onclick="transcribe(${i})">Transcribe</button>
-       <button style="flex:1" onclick="readText(${i})">Read a text file</button></div>
+       <button style="flex:1" onclick="readText(${i})">Open a file</button></div>
      <div class="row" style="margin-top:6px">
        <button style="flex:1" onclick="chooser(${i},'speechify')">Speechify</button>
        <button style="flex:1" onclick="chooser(${i},'hume')">Hume</button></div>
      <div class="row" style="margin-top:6px">
-       <button style="flex:1" onclick="revert(${i})">Play my own recording again</button>
+       <button style="flex:2" onclick="download(${i})">⤓ Download this audio</button>
+       <button style="flex:1" onclick="revert(${i})">My own recording</button></div>
+     <div style="color:var(--dim);font-size:10px;margin-top:4px">
+       ${c.hasAudio ? `WAV, ${(c.rate/1000).toFixed(1)} kHz, mono, 16-bit, uncompressed` : ""}</div>
+     <div class="row" style="margin-top:12px">
        <button style="flex:1;border-color:var(--red)" onclick="del(${i})">Delete</button></div>`,
     `<b>The waveform</b>Left click sets the start, right click sets the stop. No dragging: a
      mouse can put a point exactly where the pointer already is, and a drag is two events and a
@@ -586,9 +605,22 @@ async function openCell(i){
      of breath is something a pointer can land on. Press again for the whole recording.
      <b>∞</b>A flag, not a start button. A marked cell carries ∞ on the grid; in play mode one
      click starts it looping and the next stops it, with no gap at the join.
+     <b>The text box</b>Whatever is in it is this cell's line. Type it, paste it, transcribe the
+     recording into it, or open a file into it — then correct it by hand if a word came back
+     wrong. Everything writes into the same box, and Perform reads whatever is there.
+     <b>Perform this text</b>Speaks the box in the cell's chosen voice and stores it beside your
+     recording. If no voice is chosen yet it asks for one first. Your take is never replaced.
      <b>Transcribe</b>The words become the cell's text, exactly as spoken.
      <b>Read a text file</b>The other direction: hand it a file and a voice reads it. If this cell
      has no voice yet, pick one first.
+     <b>Download this audio</b>The exact file this cell plays — the generated voice if one is
+     chosen, your own take if not — named after what it says rather than after its number, because
+     a folder of cell-01 through cell-30 is thirty files nobody can tell apart on a timeline.
+     Nothing is re-encoded: it is the bytes on disk, 16-bit PCM in a WAV. The browser records raw
+     samples and writes the header itself at 44.1 kHz mono, and both engines are asked for wav
+     rather than mp3, so nothing here has ever been through a lossy codec.
+     <b>My own recording</b>Points the cell back at your take. It was never replaced — the
+     generated voice sits beside it in a different file.
      <b>Delete</b>There is no undo, and there is not meant to be one.`);
 
   const cv = $("#big");
@@ -733,6 +765,25 @@ function edZoom(){
 }
 window.edZoom = edZoom;
 
+/*
+  A LINK CLICKED FOR THE PERSON, RATHER THAN A FETCH AND A BLOB.
+
+  Fetching the bytes into memory to build a download would read the whole file, base64 it through
+  JSON or hold an object URL, and hand the browser a copy — for a file the server can already
+  serve with a Content-Disposition on it. This way the browser streams it straight to the download
+  folder and the name comes from the server, which is the only place that knows the transcript.
+*/
+function download(i){
+  const a = document.createElement("a");
+  a.href = "/api/download/" + i + "?project=" + S.project;
+  a.download = "";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  stage("downloaded cell " + (i+1));
+}
+window.download = download;
+
 async function transcribe(i){
   const d = await busy("uploading and transcribing…", async () =>
     (await api("/api/transcribe/" + i, {method:"POST"})).json());
@@ -761,6 +812,31 @@ async function del(i){
   stage("cell " + (i+1) + " deleted"); closeScreen();
 }
 window.del = del;
+
+async function performText(i){
+  const box = $("#celltext");
+  const text = box ? box.value : "";
+  if (!text.trim()) return stage("nothing in the box to perform");
+
+  // THROUGH THE SAME ROUTE AS AN OPENED FILE. The server cleans it — byte-order mark, line
+  // endings, the two thousand character cut — and stores it, so a pasted paragraph and a picked
+  // file arrive at the engine in exactly the same shape. Two paths would drift and the one used
+  // less would be the drifted one.
+  const d = await busy("saving the line…", async () =>
+    (await api("/api/text/" + i, {method:"POST",
+      headers:{"Content-Type":"application/json"}, body: JSON.stringify({text})})).json());
+  if (!d.ok) return stage(d.why);
+  await refresh();
+  const c = S.cells[i];
+  if (!c.voice){
+    stage(d.chars + " characters. Now pick Speechify or Hume to perform it.");
+    openCell(i);
+    return;
+  }
+  await speakCell(i, c.voice, c.voiceId, null, c.voice);
+  openCell(i);
+}
+window.performText = performText;
 
 function readText(i){
   const f = document.createElement("input");
