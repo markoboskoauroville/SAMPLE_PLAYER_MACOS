@@ -1744,6 +1744,11 @@ async function keyring(){
      Speechify at its voice list rather than /v1/models, which returns 404 and reads as a dead key;
      Hume at its token endpoint with the api key AND the secret, because an account is the pair and
      testing the api key alone proves nothing about the other half.
+     <b>The colours</b>The provider's name carries its own colour, and it is the same colour in
+     the phone app — the two are used an hour apart on the same note, and a provider being pink in
+     one and violet in the other would make the colour worse than none, because it would have to
+     be re-learned every time the device changed. The bar down the left edge is the RESULT, which
+     is a different question and so a different position.
      <b>The four answers</b>Green is working. Amber is busy — a HEALTHY key having a throttled
      minute, and never a reason to delete it. Red is refused, out of credit, or the wrong provider
      for that key shape. Grey says nothing about the key at all: no network, or Cloudflare blocking
@@ -1755,15 +1760,47 @@ async function keyring(){
 }
 window.keyring = keyring;
 
+/*
+  A COLOUR PER PROVIDER, so a list of forty-eight keys has visible seams in it.
+
+  The note holds five providers and twenty-one accounts of one of them. As a column of monospace
+  text that is a wall, and finding where Hume ends and Speechify begins means reading every line —
+  which is exactly the reading nobody does, and how a key ends up tested against the wrong host.
+
+  THESE ARE NOT THE STATE COLOURS. Green, amber and red already mean working, busy and refused on
+  the same row. Provider colour is on the NAME; state is a bar down the left edge of the row. Two
+  meanings, two positions, so neither has to be guessed from a hue.
+
+  THE SAME VALUES AS THE PHONE, deliberately. The two apps are used an hour apart on the same key
+  note, and Hume being pink in one and violet in the other would make the colour worse than no
+  colour — it would have to be re-learned every time the device changed.
+*/
+const PROVIDER_COLOUR = {
+  assemblyai: "#22d3ee",   // cyan — the one that is required
+  speechify: "#a78bfa",    // violet
+  hume: "#f472b6",         // pink
+  elevenlabs: "#60a5fa",   // blue, beside Speechify because sk_ makes them neighbours
+  groq: "#2dd4bf",         // teal
+  gemini: "#fde047",       // yellow
+  anthropic: "#fb923c",    // orange
+  github: "#cbd5e1",       // near white: kept and testable, never called by this app
+};
+function providerColour(p){
+  return PROVIDER_COLOUR[(p || "").toLowerCase().trim()] || "var(--label)";
+}
+
 function keyRow(r){
-  const colour = {working: "#4ade80", busy: "var(--amber)", refused: "var(--red)"}[r.state]
-                 || "var(--dim)";
-  return `<div class="vrow" style="display:flex;align-items:center;gap:6px">
+  const state = {working: "#4ade80", busy: "var(--amber)", refused: "var(--red)"}[r.state]
+                || "var(--dim)";
+  const colour = providerColour(r.provider);
+  return `<div class="vrow" style="display:flex;align-items:center;gap:6px;
+       border-left:3px solid ${state}">
     <div style="flex:1;min-width:0">
       <span style="color:${colour}">${r.provider}${r.paired ? " (pair)" : ""}</span>
       <span style="color:var(--label)"> ${escapeHtml(r.label || "—")}</span>
-      <div style="color:var(--dim);font-size:10px">${r.masked}${
-        r.why ? " · " + escapeHtml(r.why) : ""}${r.dead ? " · buried by the app" : ""}</div>
+      <div style="font-size:10px;color:var(--dim)">${r.masked}${
+        r.why ? ' · <span style="color:' + state + '">' + escapeHtml(r.why) + "</span>" : ""}${
+        r.dead ? " · buried by the app" : ""}</div>
     </div>
     <button style="padding:6px 10px" onclick="testKeys('${r.masked}')">test</button>
     <button style="padding:6px 10px;border-color:var(--red)"
@@ -1824,8 +1861,18 @@ async function settings(){
        <button style="flex:1" onclick="setPlayMode('continuous')">Continuous</button>
        <button style="flex:1" onclick="setPlayMode('single')">Single</button></div>
      <div style="color:var(--label);margin-top:10px">KEYS</div>
-     <div style="font-size:10px;color:var(--dim)">${k.keys.length} held — the Keyring tab tests
-       and removes them</div>
+     <div style="font-size:10px">${(() => {
+        // One line per provider, in that provider's colour, so the settings tab shows the shape
+        // of the ring without listing it.
+        const n = {};
+        (k.keys || []).forEach(r => { n[r.provider] = (n[r.provider] || 0) + 1; });
+        const parts = Object.keys(n).sort().map(p =>
+          `<span style="color:${providerColour(p)}">${p} ${n[p]}</span>`);
+        return parts.length
+          ? parts.join('<span style="color:var(--dim)">   </span>') +
+            `<div style="color:var(--dim);margin-top:2px">the Keyring tab tests and removes them</div>`
+          : `<span style="color:var(--dim)">none yet</span>`;
+      })()}</div>
      <div style="color:var(--label);margin-top:10px">VERSION</div>
      <div id="versionstate" style="font-size:10px;color:var(--dim)">checking…</div>
      <div class="row" style="margin-top:6px">
