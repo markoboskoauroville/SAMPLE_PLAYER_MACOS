@@ -216,7 +216,7 @@ function draw(){
       (c.words ? `<div class="w">${escapeHtml(c.words)}</div>` : "") +
       `<canvas></canvas>`;
     el.onclick = () => press(i);
-    el.oncontextmenu = e => { e.preventDefault(); openCell(i); };
+    el.oncontextmenu = e => { e.preventDefault(); shell("cell", i); };
     g.appendChild(el);
     paint(el.querySelector("canvas"), c, i);
   }
@@ -603,13 +603,55 @@ function bar(){
   b.appendChild(mk(S.mode === "play" ? "PLAY" : "REC",
     () => { stopAudio(); S.mode = S.mode === "play" ? "rec" : "play"; draw(); },
     S.mode === "play" ? "var(--amber)" : "var(--red)"));
-  b.appendChild(mk("⚙", settings));
+  b.appendChild(mk("⚙", () => shell("settings")));
 }
 
 /* ────────────────────────────────────────────────────────────── screens ── */
 /* One × in the top right on every screen that is not the grid, and all the help in one block
    at the bottom. Two lines under every control is useful once and noise the fiftieth time. */
-function screen(title, html, help){
+/*
+  THREE TABS THAT ALWAYS TRAVEL TOGETHER.
+
+  The cell, the settings and the keyring were three destinations reached from three different
+  places, so getting from one to another meant closing, finding the way in again, and losing
+  whichever cell you were on. They are one screen with three tabs now: whichever one you asked for
+  opens first and the other two are one press away, always in the same order, with the keyring
+  always last.
+
+  THE CELL TAB CARRIES ‹ AND ›. Working through a set is going from cell to cell, and closing a
+  cell to open the next one is two presses and a loss of place for something that is one step.
+  Everything on the tab follows: the line, the waveform, the voice, the loop flag.
+*/
+function shell(tab, slot){
+  S.tab = tab;
+  if (slot !== undefined && slot !== null) S.slot = slot;
+  if (tab === "cell") return openCell(S.slot);
+  if (tab === "keys") return keyring();
+  return settings();
+}
+window.shell = shell;
+
+function tabs(active){
+  const cellLabel = (S.slot === undefined || S.slot === null)
+    ? "Cell" : "Cell " + String(S.slot + 1).padStart(2, "0");
+  const one = (id, label) =>
+    `<button style="flex:1${active === id ? ";background:var(--amber);color:#000" : ""}"
+             onclick="shell('${id}')">${label}</button>`;
+  // The cell arrows sit inside the cell tab's own row rather than beside the tabs, because they
+  // move the CELL and not the tab, and a control that looks like a tab should change the tab.
+  return `<div class="row" style="margin-bottom:8px">
+    ${one("cell", cellLabel)}${one("settings", "Settings")}${one("keys", "Keyring")}</div>`;
+}
+
+function stepCell(by){
+  const at = (S.slot || 0) + by;
+  if (at < 0 || at >= S.count) return stage("that is the end of the set");
+  S.slot = at;
+  openCell(at);
+}
+window.stepCell = stepCell;
+
+function screen(title, html, help, tab){
   const s = $("#screen");
   s.className = "on";
   // THE CLOSE IS AT THE TOP, CENTRED. At the bottom it was centred and still wrong: a long
@@ -617,6 +659,7 @@ function screen(title, html, help){
   // control that must never have to be looked for. At the top it is in the same place whatever
   // the screen is long enough to hold.
   s.innerHTML = `<div class="closebar"><button onclick="closeScreen()">× close</button></div>` +
+                (tab ? tabs(tab) : "") +
                 `<h2>${title}</h2>` + html +
                 (help ? `<div class="help"><b>WHAT THESE DO</b>${help}</div>` : "");
 }
@@ -641,7 +684,10 @@ async function openCell(i){
   const c = S.cells[i];
   ed = {i, inMs: c.inMs, outMs: c.outMs || c.lengthMs, zoom: null, hoverX: null};
   screen("Cell " + String(i+1).padStart(2,"0"),
-    `<canvas id="big"></canvas>
+    `<div class="row" style="margin-bottom:8px">
+       <button style="flex:1" onclick="stepCell(-1)">‹ previous</button>
+       <button style="flex:1" onclick="stepCell(1)">next ›</button></div>
+     <canvas id="big"></canvas>
      <div style="margin:6px 0;font-size:10px">
        <span style="color:var(--amber)">▌left click = in</span>
        <span style="color:var(--red);margin-left:14px">▌right click = out</span>
@@ -723,7 +769,7 @@ async function openCell(i){
      rather than mp3, so nothing here has ever been through a lossy codec.
      <b>My own recording</b>Points the cell back at your take. It was never replaced — the
      generated voice sits beside it in a different file.
-     <b>Delete</b>There is no undo, and there is not meant to be one.`);
+     <b>Delete</b>There is no undo, and there is not meant to be one.`, "cell");
 
   const cv = $("#big");
 
@@ -1673,6 +1719,89 @@ async function speakCell(slot, engine, storedKey, model, voiceId, name){
 }
 
 /* ───────────────────────────────────────────────────────────── settings ── */
+/*
+  THE KEYRING, PORTED FROM Key_Tester.
+
+  Every provider is asked at the endpoint that actually answers for it, and the four states are
+  four rather than three: working, busy, refused, and a fourth that says nothing about the key at
+  all. Folding that fourth into "refused" is how a good account gets deleted because the wifi was
+  captive.
+*/
+async function keyring(){
+  const k = await (await fetch("/api/keys")).json();
+  screen("Keyring",
+    `<div class="row">
+       <button style="flex:1" onclick="importKeys()">Import from a file</button>
+       <button style="flex:1" onclick="testKeys()">Test all</button></div>
+     <div style="color:var(--dim);font-size:10px;margin:8px 0">${k.file}</div>
+     <div id="keyrows">${k.keys.length ? k.keys.map(r => keyRow(r)).join("") :
+       "<div style='color:var(--dim)'>no keys yet — import the note you already have</div>"}</div>`,
+    `<b>Import from a file</b>Pick the note you already have. Keys are found by SHAPE, so account
+     names, dates, the word CANCELLED and pasted URLs are all fine and never mistaken for
+     credentials; the line above each key is kept as its label. Importing the same note twice adds
+     nothing and says so.
+     <b>Test</b>One real call per key, at the endpoint that actually answers for that provider —
+     Speechify at its voice list rather than /v1/models, which returns 404 and reads as a dead key;
+     Hume at its token endpoint with the api key AND the secret, because an account is the pair and
+     testing the api key alone proves nothing about the other half.
+     <b>The four answers</b>Green is working. Amber is busy — a HEALTHY key having a throttled
+     minute, and never a reason to delete it. Red is refused, out of credit, or the wrong provider
+     for that key shape. Grey says nothing about the key at all: no network, or Cloudflare blocking
+     the request, which looks exactly like a dead account and is not one.
+     <b>Delete</b>Writes DELETED over the token and leaves every other line where it was, because
+     the parser reads each key's account name from the line above it and cutting a line out would
+     shift what the next key thinks it is called.`,
+    "keys");
+}
+window.keyring = keyring;
+
+function keyRow(r){
+  const colour = {working: "#4ade80", busy: "var(--amber)", refused: "var(--red)"}[r.state]
+                 || "var(--dim)";
+  return `<div class="vrow" style="display:flex;align-items:center;gap:6px">
+    <div style="flex:1;min-width:0">
+      <span style="color:${colour}">${r.provider}${r.paired ? " (pair)" : ""}</span>
+      <span style="color:var(--label)"> ${escapeHtml(r.label || "—")}</span>
+      <div style="color:var(--dim);font-size:10px">${r.masked}${
+        r.why ? " · " + escapeHtml(r.why) : ""}${r.dead ? " · buried by the app" : ""}</div>
+    </div>
+    <button style="padding:6px 10px" onclick="testKeys('${r.masked}')">test</button>
+    <button style="padding:6px 10px;border-color:var(--red)"
+            onclick="deleteKey('${r.masked}')">delete</button>
+  </div>`;
+}
+
+async function testKeys(masked){
+  const d = await busy(masked ? "testing one key…" : "testing every key, one at a time…", async () =>
+    (await fetch("/api/keys/test", {method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({masked: masked || null})})).json());
+  const rows = $("#keyrows");
+  if (rows && d.results && d.results.length){
+    if (masked){
+      // One key tested: replace only that row, so the other answers stay on screen.
+      const all = [...rows.querySelectorAll(".vrow")];
+      const at = all.findIndex(el => el.textContent.includes(masked));
+      if (at >= 0) all[at].outerHTML = keyRow(d.results[0]);
+    } else {
+      rows.innerHTML = d.results.map(r => keyRow(r)).join("");
+    }
+  }
+  const good = (d.results || []).filter(r => r.state === "working").length;
+  stage(good + " of " + (d.results || []).length + " working");
+}
+window.testKeys = testKeys;
+
+async function deleteKey(masked){
+  const d = await busy("deleting…", async () =>
+    (await fetch("/api/keys/delete", {method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({masked})})).json());
+  stage(d.why || (d.ok ? "deleted" : "not deleted"));
+  keyring();
+}
+window.deleteKey = deleteKey;
+
 async function settings(){
   const k = await (await fetch("/api/keys")).json();
   setTimeout(showCache, 0);
@@ -1695,12 +1824,8 @@ async function settings(){
        <button style="flex:1" onclick="setPlayMode('continuous')">Continuous</button>
        <button style="flex:1" onclick="setPlayMode('single')">Single</button></div>
      <div style="color:var(--label);margin-top:10px">KEYS</div>
-     <div style="font-size:10px;white-space:pre-line">${
-       k.keys.length ? k.keys.map(r =>
-         `${r.provider}${r.paired?" (pair)":""}  ${r.label||"—"}  ${r.masked}${r.dead?"  DEAD":""}`
-       ).join("\n") : "none yet"}</div>
-     <div style="height:6px"></div>
-     <button style="width:100%" onclick="importKeys()">Import keys from a file</button>
+     <div style="font-size:10px;color:var(--dim)">${k.keys.length} held — the Keyring tab tests
+       and removes them</div>
      <div style="color:var(--label);margin-top:10px">VERSION</div>
      <div id="versionstate" style="font-size:10px;color:var(--dim)">checking…</div>
      <div class="row" style="margin-top:6px">
@@ -1732,7 +1857,7 @@ async function settings(){
      SHAPE, so account names, dates, the word CANCELLED and pasted URLs are all fine and are never
      mistaken for credentials; the line above each key is kept as its label. Importing the same
      note twice adds nothing and says so. AssemblyAI transcribes and is required; Speechify and
-     Hume are the two engines and either is enough. Keys are never displayed anywhere.`);
+     Hume are the two engines and either is enough. Keys are never displayed anywhere.`, "settings");
 }
 window.settings = settings;
 /*

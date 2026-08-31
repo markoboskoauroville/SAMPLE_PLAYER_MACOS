@@ -62,7 +62,7 @@ MAX_TEXT = 2000
 # THE VERSION THIS FILE IS. Bumped by hand in the same edit that bumps the installer, and checked
 # against it by G1 — two numbers that must agree is a lie waiting to happen, so the gate compares
 # them rather than trusting anybody to remember.
-EDITION = "v2.5"
+EDITION = "v2.6"
 
 RAW = "https://raw.githubusercontent.com/markoboskoauroville/SAMPLE_PLAYER_MACOS/main"
 
@@ -1295,6 +1295,148 @@ def import_keys():
 
     said = ", ".join("%s +%d" % (k, v) for k, v in sorted(counts.items()))
     return jsonify({"ok": True, "added": sum(counts.values()), "why": "Imported: " + said})
+
+
+# ── testing a key, the Key_Tester table ───────────────────────────────────────────────────────
+#
+# WHERE EACH PROVIDER IS ASKED, AND WHERE IT IS NOT. Ported from `Key_Tester/Providers.kt` rather
+# than rewritten, because every entry here is a measurement somebody already paid for:
+#
+#   Speechify is `/v1/voices?limit=1`. NOT `/v1/models` — that answers `404 page not found`, which
+#   reads as a dead key and has condemned working accounts.
+#   AssemblyAI is `/v2/transcript?limit=1`, and its header is the RAW key with no `Bearer`.
+#   Hume is the TOKEN endpoint with the pair as Basic auth. `/v0/tts/voices` tests the api key
+#   alone, which proves nothing about the secret, and an account is the pair.
+#   Groq, Gemini and Anthropic are here because the note contains them; the app never calls them.
+
+PROBES = {
+    "speechify": ("GET", "https://api.sws.speechify.com/v1/voices?limit=1",
+                  lambda k: {"Authorization": "Bearer " + k}),
+    "elevenlabs": ("GET", "https://api.elevenlabs.io/v1/user",
+                   lambda k: {"xi-api-key": k}),
+    "assemblyai": ("GET", "https://api.assemblyai.com/v2/transcript?limit=1",
+                   lambda k: {"authorization": k}),
+    "groq": ("GET", "https://api.groq.com/openai/v1/models",
+             lambda k: {"Authorization": "Bearer " + k}),
+    "gemini": ("GET", "https://generativelanguage.googleapis.com/v1beta/models",
+               lambda k: {"x-goog-api-key": k}),
+    "anthropic": ("GET", "https://api.anthropic.com/v1/models",
+                  lambda k: {"x-api-key": k, "anthropic-version": "2023-06-01"}),
+}
+
+
+def test_credential(cred):
+    """
+    One real call. Returns (status, sentence).
+
+    THE FOUR ANSWERS ARE NOT THREE. Working, busy, refused — and a fourth that says nothing about
+    the key at all: no network, or Cloudflare. Folding that fourth into "refused" is how a good
+    account gets deleted because the wifi was captive.
+    """
+    provider = cred["provider"]
+
+    if provider == "hume":
+        # THE PAIR, TESTED AS A PAIR. Base64 without newlines: a wrapped Authorization header is a
+        # corrupt one, and the wrap appears only once the pair is long enough.
+        if not cred.get("secret"):
+            return "unknown", "this Hume key has no secret beside it"
+        basic = base64.b64encode(
+            ("%s:%s" % (cred["key"], cred["secret"])).encode()).decode().replace("\n", "")
+        code, body = http("POST", "https://api.hume.ai/oauth2-cc/token",
+                          {"Authorization": "Basic " + basic,
+                           "Content-Type": "application/x-www-form-urlencoded"},
+                          b"grant_type=client_credentials", timeout=30)
+        if code == 200 and b"access_token" in body:
+            return "working", "working"
+        return status_word(code, body), explain(code, body)
+
+    probe = PROBES.get(provider)
+    if not probe:
+        return "unknown", "nothing here knows how to test a %s key" % provider
+    method, url, headers = probe
+    code, body = http(method, url, headers(cred["key"]), None, timeout=30)
+    if 200 <= code < 300:
+        return "working", "working"
+
+    # sk_ IS SHARED between Speechify and ElevenLabs and only length separates them. A key on the
+    # wrong side of that line is tested against the wrong host and answers 401, which is
+    # indistinguishable from dead — so the other one is tried before anything is said.
+    if code == 401 and provider in ("speechify", "elevenlabs"):
+        other = "elevenlabs" if provider == "speechify" else "speechify"
+        m, u, h = PROBES[other]
+        c2, b2 = http(m, u, h(cred["key"]), None, timeout=30)
+        if 200 <= c2 < 300:
+            return "working", "working, but it is a %s key rather than a %s one" % (other, provider)
+
+    return status_word(code, body), explain(code, body)
+
+
+def status_word(code, body):
+    b = (body or b"").decode("utf-8", "replace").lower()
+    if code == -1:
+        return "unknown"
+    if code == 403 and ("1010" in b or "cloudflare" in b):
+        return "unknown"
+    if code == 429:
+        return "busy"
+    if 200 <= code < 300:
+        return "working"
+    if is_dead_answer(code, body):
+        return "refused"
+    return "unknown"
+
+
+@app.route("/api/keys/test", methods=["POST"])
+def test_keys():
+    """
+    Test one key, or every key.
+
+    ONE AT A TIME AND SEQUENTIALLY. Twenty-one Hume accounts asked at once is twenty-one requests
+    from one address in one second, which is what a rate limiter is for — and the answer would be
+    a column of 429s that say nothing about any of the keys.
+    """
+    b = request.get_json(force=True) or {}
+    want = b.get("masked")
+    out = []
+    if not os.path.isfile(KEYS_FILE):
+        return jsonify({"results": out})
+    for cred in parse_keys(open(KEYS_FILE, encoding="utf-8", errors="replace").read()):
+        if want and masked(cred["key"]) != want:
+            continue
+        state, why = test_credential(cred)
+        out.append({"provider": cred["provider"], "label": cred["label"],
+                    "masked": masked(cred["key"]), "state": state, "why": why})
+    return jsonify({"results": out})
+
+
+@app.route("/api/keys/delete", methods=["POST"])
+def delete_key():
+    """
+    Write DELETED over the token, and leave every other line where it was.
+
+    NOT CUT OUT. The parser reads a key's account name from the line ABOVE it, so removing a line
+    shifts what the next key thinks it is called — and a note where every account has the previous
+    account's name is worse than a note with a dead key in it.
+    """
+    want = (request.get_json(force=True) or {}).get("masked")
+    if not want or not os.path.isfile(KEYS_FILE):
+        return jsonify({"ok": False, "why": "no such key"})
+    text = open(KEYS_FILE, encoding="utf-8", errors="replace").read()
+    hit = None
+    for cred in parse_keys(text):
+        if masked(cred["key"]) == want:
+            hit = cred
+            break
+    if not hit:
+        return jsonify({"ok": False, "why": "no such key"})
+    out = text.replace(hit["key"], "DELETED")
+    if hit.get("secret"):
+        out = out.replace(hit["secret"], "DELETED")
+    tmp = KEYS_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(out)
+    os.replace(tmp, KEYS_FILE)
+    return jsonify({"ok": True, "why": "deleted, and the note's shape is unchanged"})
 
 
 @app.route("/api/keys")
