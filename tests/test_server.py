@@ -361,6 +361,19 @@ class ProbeClip(unittest.TestCase):
         # A probe that differs run to run is one that cannot be compared with a previous run.
         self.assertEqual(S.probe_clip(), S.probe_clip())
 
+    def test_it_is_the_manifest_fixture_byte_for_byte(self):
+        # THE DIGEST IS THE POINT OF THE FIXTURE. Four apps in three languages each rolling their
+        # own tone is four slightly different files, and the day two of them disagreed about what
+        # a probe failure meant there would be no way to say which was right.
+        #
+        # MANTRA_MANIFEST/fixtures/probe-1s-440hz.wav, verified 30.8.2026.
+        import hashlib
+        self.assertEqual(
+            hashlib.sha256(S.probe_clip()).hexdigest(),
+            "9e2c610d9b40fbfe83c6de65590d815834bfd2669e493c58ec526874222ec545",
+        )
+        self.assertEqual(len(S.probe_clip()), 32_044)
+
     def test_it_is_small_enough_to_upload_in_a_moment(self):
         self.assertLess(len(S.probe_clip()), 64 * 1024)
 
