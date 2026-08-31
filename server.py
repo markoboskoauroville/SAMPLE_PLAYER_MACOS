@@ -62,7 +62,7 @@ MAX_TEXT = 2000
 # THE VERSION THIS FILE IS. Bumped by hand in the same edit that bumps the installer, and checked
 # against it by G1 — two numbers that must agree is a lie waiting to happen, so the gate compares
 # them rather than trusting anybody to remember.
-EDITION = "v2.8"
+EDITION = "v2.9"
 
 RAW = "https://raw.githubusercontent.com/markoboskoauroville/SAMPLE_PLAYER_MACOS/main"
 
@@ -78,7 +78,7 @@ RATES_FILE = os.path.join(APPDIR, "rates.json")
 #
 # All three are facts the provider states about the call that was just made. None of them is an
 # estimate, which is the whole reason the log is worth keeping.
-UNITS = {"speechify": "characters", "hume": "seconds", "assemblyai": "seconds of audio"}
+UNITS = {"speechify": "characters", "hume": "characters", "assemblyai": "seconds of audio"}
 
 # THE RATES DEFAULT TO ZERO AND ARE ASKED FOR RATHER THAN GUESSED.
 #
@@ -763,8 +763,12 @@ def speak(engine, voice_id, model, text, direction=""):
                 log_spend("speechify", d.get("billable_characters_count") or len(text),
                           text[:60])
             else:
-                gens = d.get("generations") or [{}]
-                log_spend("hume", gens[0].get("duration") or 0, text[:60])
+                # CHARACTERS, NOT SECONDS. Hume bills by the character — its pricing page is in
+                # dollars per thousand characters — and the duration it returns is a fact about the
+                # audio rather than about the invoice. Logging seconds gave a number that was
+                # accurate and measured the wrong thing, which is the worst kind of wrong for a
+                # figure somebody is going to budget against.
+                log_spend("hume", len(text), text[:60])
             return base64.b64decode(b64), ""
         if is_dead_answer(code, body):
             condemn(c["key"])
@@ -1442,8 +1446,9 @@ def test_credential(cred):
     provider = cred["provider"]
 
     if provider == "hume":
-        # THE PAIR, TESTED AS A PAIR. Base64 without newlines: a wrapped Authorization header is a
-        # corrupt one, and the wrap appears only once the pair is long enough.
+        # THE PAIR, TESTED AS A PAIR, BEFORE ANYTHING ELSE. Base64 without newlines: a wrapped
+        # Authorization header is a corrupt one, and the wrap only appears once the pair is long
+        # enough. This proves the ACCOUNT exists; the work probe below proves it can do anything.
         if not cred.get("secret"):
             return "unknown", "this Hume key has no secret beside it"
         basic = base64.b64encode(
@@ -1452,9 +1457,22 @@ def test_credential(cred):
                           {"Authorization": "Basic " + basic,
                            "Content-Type": "application/x-www-form-urlencoded"},
                           b"grant_type=client_credentials", timeout=30)
-        if code == 200 and b"access_token" in body:
-            return "working", "working"
-        return status_word(code, body), explain(code, body)
+        if code != 200 or b"access_token" not in body:
+            return status_word(code, body), explain(code, body)
+
+    # THE WORK PROBE IS THE ONE THAT TELLS THE TRUTH.
+    #
+    # A list call says "this key is a real key", and it says it just as cheerfully for an account
+    # that cannot generate a single word — which is the trick that sent this ring at a wall three
+    # times. Hume's token endpoint is the same lie in a different shape. Only asking for WORK asks
+    # whether work is possible.
+    #
+    # Hume's billing page is why this matters beyond one provider: a new account gets its free
+    # credit ONCE, and the monthly reset applies only to a paid subscription — so a spent free
+    # account is spent for good rather than until the first of the month.
+    verdict = work_probe(cred)
+    if verdict:
+        return verdict
 
     probe = PROBES.get(provider)
     if not probe:
@@ -1475,6 +1493,182 @@ def test_credential(cred):
             return "working", "working, but it is a %s key rather than a %s one" % (other, provider)
 
     return status_word(code, body), explain(code, body)
+
+
+# THE WORDS EVERY PROVIDER USES WHEN THE MONEY HAS RUN OUT, and they all use different ones.
+#
+#   Hume        400  E0300 / zero_credits / "Exhausted credit balance"
+#   Anthropic   400  "credit balance is too low"
+#   Gemini      429  RESOURCE_EXHAUSTED / "quota"
+#   Groq        429  rate_limit_exceeded, and on the free tier a day's allowance
+#   Speechify   402 or a message naming the plan
+#   AssemblyAI  a billing message on submit
+#
+# Matched as words rather than by code, because the CODE is the thing they disagree about: the
+# same fact is a 400 at Hume, a 402 at Speechify and a 429 at Google.
+# OUT OF CREDIT AND THROTTLED BOTH SAY "QUOTA", AND THEY ARE OPPOSITE FACTS.
+#
+# Measured on the real keys, 30.8.2026. Gemini answers a spent account with:
+#
+#     HTTP 429  RESOURCE_EXHAUSTED
+#     "Your prepayment credits are depleted."
+#
+# and answers a key that has simply been asked twice in one second with the SAME code and the same
+# word RESOURCE_EXHAUSTED — but with a `QuotaFailure` detail naming a per-minute quota and a
+# `RetryInfo` saying how long to wait.
+#
+# Reading the word alone would tell somebody to delete a live key because they pressed Test twice.
+# So the retry hint is checked FIRST and wins: anything that says how long to wait is saying come
+# back, not pay up.
+STRONG_MONEY = (
+    "credit", "e0300", "zero_credits", "balance", "depleted", "insufficient",
+    "billing", "payment", "out of funds", "upgrade your plan", "prepayment",
+)
+
+# These appear in both, so they only count when nothing suggests waiting.
+WEAK_MONEY = ("quota", "exhausted", "resource_exhausted", "free tier", "plan limit")
+
+WAIT_HINTS = ("retrydelay", "retry-after", "retryinfo", "quotafailure",
+              "per minute", "per-minute", "rate limit", "rate_limit", "try again in")
+
+
+def sounds_like_money(body):
+    """True when the answer means PAY, false when it means WAIT or anything else."""
+    b = (body or b"").decode("utf-8", "replace").lower()
+    if any(h in b for h in WAIT_HINTS):
+        # It told us how long to wait, so it is a throttle whatever else it says.
+        return False
+    if any(w in b for w in STRONG_MONEY):
+        return True
+    return any(w in b for w in WEAK_MONEY)
+
+
+# THE CHEAPEST REAL PIECE OF WORK EACH PROVIDER CAN DO.
+#
+# A LIST CALL ANSWERS THE WRONG QUESTION. `/v1/voices` and `/v1/models` say "this key is a real
+# key", and they say it just as cheerfully for an account that cannot generate a single word —
+# which is the trick that sent this ring at a wall three times. Only asking for WORK asks whether
+# work is possible.
+#
+# Each of these is the smallest billable unit that provider sells: one word of speech, one token
+# of text. It costs a fraction of a cent when the account is alive and NOTHING when it is not,
+# which is the direction that matters.
+WORK_PROBES = {
+    "hume": ("POST", "https://api.hume.ai/v0/tts",
+             lambda c: {"X-Hume-Api-Key": c["key"], "Content-Type": "application/json"},
+             lambda c: json.dumps({"utterances": [{"text": "Hi."}],
+                                   "format": {"type": "wav"}, "num_generations": 1}).encode()),
+    "speechify": ("POST", "https://api.sws.speechify.com/v1/audio/speech",
+                  lambda c: {"Authorization": "Bearer " + c["key"],
+                             "Content-Type": "application/json"},
+                  lambda c: json.dumps({"input": "Hi.", "voice_id": "beatrice_32",
+                                        "audio_format": "wav", "model": "simba-3.2"}).encode()),
+    # THE MODEL IS ASKED FOR RATHER THAN NAMED.
+    #
+    # The first version of this named llama-3.1-8b-instant, gemini-2.0-flash and
+    # claude-3-5-haiku, and all three answered 404 — every one of them had been retired or
+    # renamed. A probe that hard-codes a model is a probe with an expiry date, and the failure it
+    # produces looks exactly like a broken key, which is the worst possible way for it to break.
+    #
+    # So the list call comes first and the probe uses whatever that account actually has. It costs
+    # one extra request, on a button somebody presses by hand.
+    "groq": ("POST", "https://api.groq.com/openai/v1/chat/completions",
+             lambda c: {"Authorization": "Bearer " + c["key"],
+                        "Content-Type": "application/json"},
+             lambda c: json.dumps({
+                 "model": first_model(c) or "llama-3.3-70b-versatile", "max_tokens": 1,
+                 "messages": [{"role": "user", "content": "hi"}]}).encode()),
+    "gemini": ("POST", None,
+               lambda c: {"x-goog-api-key": c["key"], "Content-Type": "application/json"},
+               lambda c: json.dumps({"contents": [{"parts": [{"text": "hi"}]}],
+                                     "generationConfig": {"maxOutputTokens": 1}}).encode()),
+    "anthropic": ("POST", "https://api.anthropic.com/v1/messages",
+                  lambda c: {"x-api-key": c["key"], "anthropic-version": "2023-06-01",
+                             "Content-Type": "application/json"},
+                  lambda c: json.dumps({
+                      "model": first_model(c) or "claude-3-5-haiku-20241022", "max_tokens": 1,
+                      "messages": [{"role": "user", "content": "hi"}]}).encode()),
+    # ASSEMBLYAI HAS NO CHEAP WORK CALL. Transcription needs audio uploaded and is billed by the
+    # hour, so there is no fraction of a cent to spend asking. Its list call is used instead, and
+    # a billing message on it is still read — which is the honest limit rather than a probe that
+    # costs real money every time somebody presses Test.
+}
+
+
+def first_model(cred):
+    """
+    The first model this account can actually use, asked for rather than assumed.
+
+    Measured 30.8.2026: Groq's list has whisper and gpt-oss on it, Gemini's has gemini-2.5-flash,
+    Anthropic's has claude-opus-5. None of the names written into the first version of this probe
+    existed any more.
+    """
+    provider = cred["provider"]
+    if provider == "groq":
+        code, body = http("GET", "https://api.groq.com/openai/v1/models",
+                          {"Authorization": "Bearer " + cred["key"]})
+        if code != 200:
+            return None
+        for m in (json.loads(body).get("data") or []):
+            i = m.get("id", "")
+            # Text models only: asking a speech model for a chat completion is a 400 that reads
+            # like a dead key.
+            if i and "whisper" not in i and "tts" not in i and "guard" not in i:
+                return i
+        return None
+    if provider == "anthropic":
+        code, body = http("GET", "https://api.anthropic.com/v1/models",
+                          {"x-api-key": cred["key"], "anthropic-version": "2023-06-01"})
+        if code != 200:
+            return None
+        data = json.loads(body).get("data") or []
+        return data[0].get("id") if data else None
+    if provider == "gemini":
+        code, body = http("GET", "https://generativelanguage.googleapis.com/v1beta/models",
+                          {"x-goog-api-key": cred["key"]})
+        if code != 200:
+            return None
+        for m in (json.loads(body).get("models") or []):
+            if "generateContent" in (m.get("supportedGenerationMethods") or []):
+                name = m.get("name", "")
+                if "tts" not in name and "image" not in name:
+                    return name
+        return None
+    return None
+
+
+def work_probe(cred):
+    """
+    Ask the provider to do the smallest real thing it sells.
+
+    Returns (state, sentence) or None when there is no cheap probe for that provider.
+    """
+    probe = WORK_PROBES.get(cred["provider"])
+    if not probe:
+        return None
+    method, url, headers, body = probe
+    if url is None:
+        # Gemini puts the model in the PATH, so its url cannot be written down until the model is
+        # known. A missing url here means "ask first", rather than a hole somebody has to notice.
+        model = first_model(cred)
+        if not model:
+            return "unknown", "could not ask which models this account has"
+        url = "https://generativelanguage.googleapis.com/v1beta/%s:generateContent" % model
+    code, resp = http(method, url, headers(cred), body(cred), timeout=45)
+    if 200 <= code < 300:
+        if cred["provider"] == "hume":
+            log_spend("hume", len("Hi."), "key test")
+        elif cred["provider"] == "speechify":
+            log_spend("speechify", 3, "key test")
+        return "working", "working, and it has credit"
+    if sounds_like_money(resp):
+        # ITS OWN STATE, NEITHER WORKING NOR REFUSED. The key is real and the account is alive; it
+        # simply cannot do anything until somebody pays. Calling it working sends the ring at a
+        # wall; calling it refused has somebody delete a live account they only needed to top up.
+        return "no credit", "account live, free credit spent \u2014 it needs a paid plan"
+    if code == 429:
+        return "busy", "alive, and throttled this minute"
+    return status_word(code, resp), explain(code, resp)
 
 
 def status_word(code, body):
@@ -1559,7 +1753,7 @@ def key_credit():
         if 200 <= code < 300:
             d = json.loads(body)
             gens = d.get("generations") or [{}]
-            log_spend("hume", gens[0].get("duration") or 0, "credit test")
+            log_spend("hume", len("Hi."), "credit test")
             return jsonify({"ok": True, "state": "has credit", "why": "has credit"})
         b = body.decode("utf-8", "replace").lower()
         if "credit" in b or "e0300" in b:

@@ -335,12 +335,36 @@ class Spend(unittest.TestCase):
         self.assertEqual(per["speechify"]["calls"], 2)
         self.assertEqual(per["hume"]["units"], 3.5)
 
-    def test_each_provider_keeps_its_own_unit(self):
-        # Characters and seconds added together would be a number that means nothing.
+    def test_each_provider_is_counted_in_what_it_bills(self):
+        # Speechify and Hume both bill CHARACTERS — Hume's pricing page is in dollars per thousand
+        # of them — so they share a unit. AssemblyAI bills by audio duration and must not be added
+        # to either: seconds and characters in one total is a number that means nothing.
         S.log_spend("speechify", 100, "a")
         S.log_spend("hume", 10, "b")
+        S.log_spend("assemblyai", 30, "c")
         per, _ = S.spend_totals()
-        self.assertNotEqual(per["speechify"]["unit"], per["hume"]["unit"])
+        self.assertEqual(per["speechify"]["unit"], per["hume"]["unit"])
+        self.assertNotEqual(per["assemblyai"]["unit"], per["hume"]["unit"])
+
+    def test_a_throttle_is_not_read_as_an_empty_account(self):
+        # Gemini answers both with 429 RESOURCE_EXHAUSTED. The one that says how long to wait is
+        # saying come back, not pay up — and reading it wrongly would have somebody delete a live
+        # key because they pressed Test twice in a second.
+        throttled = b'{"error":{"status":"RESOURCE_EXHAUSTED","details":[{"@type":"RetryInfo",\
+"retryDelay":"31s"}]}}'
+        spent = b'{"error":{"status":"RESOURCE_EXHAUSTED","message":"Your prepayment credits \
+are depleted."}}'
+        self.assertFalse(S.sounds_like_money(throttled))
+        self.assertTrue(S.sounds_like_money(spent))
+
+    def test_the_hume_and_anthropic_wordings_are_both_recognised(self):
+        self.assertTrue(S.sounds_like_money(b'{"code":"E0300","message":"Exhausted credit balance"}'))
+        self.assertTrue(S.sounds_like_money(b'{"error":{"message":"credit balance is too low"}}'))
+
+    def test_an_ordinary_failure_is_not_a_money_failure(self):
+        self.assertFalse(S.sounds_like_money(b"404 page not found"))
+        self.assertFalse(S.sounds_like_money(b'{"error":"invalid api key"}'))
+        self.assertFalse(S.sounds_like_money(b""))
 
     def test_money_is_zero_until_a_rate_is_entered(self):
         S.log_spend("speechify", 1000, "a")

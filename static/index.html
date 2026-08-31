@@ -1749,7 +1749,11 @@ async function keyring(){
      one and violet in the other would make the colour worse than none, because it would have to
      be re-learned every time the device changed. The bar down the left edge is the RESULT, which
      is a different question and so a different position.
-     <b>The four answers</b>Green is working. Amber is busy — a HEALTHY key having a throttled
+     <b>The five answers</b>Green is working. VIOLET is the one that matters here: the key is
+     real and the account is alive, but its free credit is spent and it cannot generate
+     anything until a plan is paid for. Hume's token endpoint says yes to such an account,
+     which is why the test also asks for one word of synthesis — believing the token
+     alone sends the key ring straight at a wall. Amber is busy — a HEALTHY key having a throttled
      minute, and never a reason to delete it. Red is refused, out of credit, or the wrong provider
      for that key shape. Grey says nothing about the key at all: no network, or Cloudflare blocking
      the request, which looks exactly like a dead account and is not one.
@@ -1790,8 +1794,11 @@ function providerColour(p){
 }
 
 function keyRow(r){
-  const state = {working: "#4ade80", busy: "var(--amber)", refused: "var(--red)"}[r.state]
-                || "var(--dim)";
+  // FIVE STATES, NOT FOUR. "no credit" is neither working nor refused: the key is real and the
+  // account is alive, it simply cannot generate anything until somebody pays. Violet, because it
+  // must not be mistaken for the green that sends the ring at it or the red that gets it deleted.
+  const state = {working: "#4ade80", busy: "var(--amber)", refused: "var(--red)",
+                 "no credit": "#a78bfa"}[r.state] || "var(--dim)";
   const colour = providerColour(r.provider);
   return `<div class="vrow" style="display:flex;align-items:center;gap:6px;
        border-left:3px solid ${state}">
