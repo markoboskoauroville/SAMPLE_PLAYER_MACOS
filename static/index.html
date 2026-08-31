@@ -1803,6 +1803,10 @@ function keyRow(r){
         r.dead ? " · buried by the app" : ""}</div>
     </div>
     <button style="padding:6px 10px" onclick="testKeys('${r.masked}')">test</button>
+    ${r.provider === "hume"
+      ? `<button style="padding:6px 10px" title="one word of synthesis: it either speaks or says out of credit"
+                 onclick="testCredit('${r.masked}',this)">credit</button>`
+      : ""}
     <button style="padding:6px 10px;border-color:var(--red)"
             onclick="deleteKey('${r.masked}')">delete</button>
   </div>`;
@@ -1829,6 +1833,37 @@ async function testKeys(masked){
 }
 window.testKeys = testKeys;
 
+/*
+  ONLY HUME HAS THIS BUTTON, AND ONLY BECAUSE ONLY HUME CAN ANSWER.
+
+  Probed on 30.8.2026 with real keys for all six providers: Hume's /v0/usage, /v0/billing and
+  /v0/account are 404; AssemblyAI's /v2/account returns an empty object and every other spelling
+  is 404; Speechify has no usage surface at all; Anthropic's usage report needs an Admin key,
+  which is a different key from the one in the note. Nothing publishes a balance.
+
+  What Hume does is REFUSE: a synthesis on an exhausted account answers 400 E0300 zero_credits.
+  So the test is the cheapest real call there is — one word — and the answer is the refusal or the
+  absence of it. It costs a word when the account is alive and nothing at all when it is not,
+  which is the direction that matters when the question is which accounts to delete.
+
+  A button on the other five would return "I cannot tell you", every time, for ever.
+*/
+async function testCredit(masked, btn){
+  const was = btn ? btn.textContent : null;
+  if (btn){ btn.dataset.spin = "1"; btn.disabled = true; }
+  try {
+    const d = await busy("asking Hume for one word…", async () =>
+      (await fetch("/api/keys/credit", {method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({masked})})).json());
+    stage(d.why || "no answer");
+    showSpend();
+  } finally {
+    if (btn){ delete btn.dataset.spin; btn.disabled = false; btn.textContent = was; }
+  }
+}
+window.testCredit = testCredit;
+
 async function deleteKey(masked){
   const d = await busy("deleting…", async () =>
     (await fetch("/api/keys/delete", {method: "POST",
@@ -1842,6 +1877,7 @@ window.deleteKey = deleteKey;
 async function settings(){
   const k = await (await fetch("/api/keys")).json();
   setTimeout(showCache, 0);
+  setTimeout(showSpend, 0);
   setTimeout(checkVersion, 0);
   screen("Settings   " + (window.VERSION || ""),
     `<div style="color:var(--label)">CELLS</div>
@@ -1877,6 +1913,10 @@ async function settings(){
      <div id="versionstate" style="font-size:10px;color:var(--dim)">checking…</div>
      <div class="row" style="margin-top:6px">
        <button style="flex:1" onclick="checkVersion()">Check for updates</button></div>
+     <div style="color:var(--label);margin-top:10px">SPENT</div>
+     <div id="spendbox" style="font-size:10px;color:var(--dim)">reading…</div>
+     <div class="row" style="margin-top:6px">
+       <button style="flex:1" onclick="spendLog()">Open the log</button></div>
      <div style="color:var(--label);margin-top:10px">CACHE</div>
      <div id="cachestate" style="font-size:10px;color:var(--dim)">reading…</div>
      <div class="row" style="margin-top:6px">
@@ -1894,6 +1934,13 @@ async function settings(){
      the process serving the page that holds the button. Press <b>u</b> in the terminal panel,
      which fetches, checks everything before touching anything, installs, and restarts as the new
      version.
+     <b>Spent</b>One line is written for every billable call, with the number the PROVIDER says
+     it charged for: Speechify states the characters it billed, Hume the seconds it produced,
+     AssemblyAI the audio duration it read. Those are facts about the call rather than estimates.
+     The box is the log added up, so clearing the log empties the box — there is no second number
+     kept anywhere that could disagree with it. Money appears only once you enter a rate, because
+     I do not know what you pay and an invented price would sit on screen looking exactly as
+     certain as the character count beside it.
      <b>Cache</b>Catalogues are fetched once and kept for a month; a voice list is seven round
      trips to receive something that changes a few times a year. Every generated sound is kept
      too, filed under the voice, the words and the direction — so going back to a voice you have
@@ -1976,6 +2023,94 @@ async function checkVersion(){
   }
 }
 window.checkVersion = checkVersion;
+
+async function showSpend(){
+  const el = $("#spendbox");
+  if (!el) return;
+  const d = await (await fetch("/api/spend")).json();
+  const parts = Object.keys(d.per).sort().map(p => {
+    const v = d.per[p];
+    return `<span style="color:${providerColour(p)}">${p} ${v.units.toLocaleString()} ${v.unit}` +
+           (v.cost ? ` · ${v.cost.toFixed(4)}` : "") + `</span>`;
+  });
+  el.innerHTML = parts.length
+    ? parts.join('<br>') + (d.money ? `<div style="color:var(--amber);margin-top:2px">
+        total ${d.money.toFixed(4)}</div>` : "") +
+      `<div style="margin-top:2px">${d.count} calls logged</div>`
+    : "nothing spent yet";
+}
+
+/*
+  THE LOG IS THE BOX, AND THE BOX IS THE LOG.
+
+  Clearing the log empties the box by arithmetic rather than by a second thing having to be
+  remembered — there is no running total kept anywhere that could drift from the lines it came
+  from. That is the whole reason the total is computed on every read instead of being stored.
+*/
+async function spendLog(){
+  const d = await busy("reading the log…", async () =>
+    (await fetch("/api/spend")).json());
+  const rows = (d.rows || []).slice().reverse();
+  screen("Spent",
+    `<div style="margin-bottom:8px">${Object.keys(d.per).sort().map(p => {
+       const v = d.per[p];
+       return `<div style="color:${providerColour(p)}">${p}: ${v.calls} calls,
+         ${v.units.toLocaleString()} ${v.unit}${v.cost ? ` — ${v.cost.toFixed(4)}` : ""}</div>`;
+     }).join("") || '<span style="color:var(--dim)">nothing logged yet</span>'}
+     ${d.money ? `<div style="color:var(--amber);margin-top:4px">total ${d.money.toFixed(4)}</div>` : ""}</div>
+
+     <div style="color:var(--label);margin-top:10px">RATE PER UNIT</div>
+     <div class="row" style="margin-top:4px">
+       ${["speechify","hume","assemblyai"].map(p =>
+         `<div style="flex:1">
+            <div style="color:${providerColour(p)};font-size:10px">${p}</div>
+            <input id="rate-${p}" type="text" value="${d.rates[p] || 0}"></div>`).join("")}
+     </div>
+     <div class="row" style="margin-top:6px">
+       <button style="flex:1" onclick="saveRates()">Save the rates</button>
+       <button style="flex:1;border-color:var(--red)" onclick="clearSpend()">Clear the log</button>
+     </div>
+
+     <div style="color:var(--label);margin-top:14px">EVERY CALL, NEWEST FIRST</div>
+     <div style="font-size:10px;margin-top:4px">${rows.length ? rows.map(r =>
+       `<div style="padding:2px 0;border-bottom:1px solid #1c1c1f">
+          <span style="color:${providerColour(r.provider)}">${r.provider}</span>
+          <span style="color:var(--dim)"> ${new Date(r.at * 1000).toLocaleString()} · ${
+            r.units} ${(d.per[r.provider] || {}).unit || "units"}</span>
+          <div style="color:var(--label)">${escapeHtml(r.detail || "")}</div>
+        </div>`).join("") : '<span style="color:var(--dim)">no calls logged</span>'}</div>`,
+    `<b>The numbers</b>Each line is what the PROVIDER said it charged for that call — Speechify
+     states the characters it billed, Hume the seconds it produced, AssemblyAI the audio duration
+     it read. They are facts about the call rather than guesses about it.
+     <b>Rate per unit</b>Empty by default, and asked for rather than invented: I do not know what
+     you pay, published prices change, and several of these accounts are on terms I cannot see. A
+     number I made up would sit on screen looking exactly as certain as the character count beside
+     it. Enter what a character, a second and a second of audio cost you and the money appears.
+     <b>Clear the log</b>Empties it, and the box with it. The total has never been stored anywhere
+     — it is the log added up on every read — so there is no second number that could survive the
+     clearing and disagree.`,
+    "settings");
+}
+window.spendLog = spendLog;
+
+async function saveRates(){
+  const body = {};
+  ["speechify", "hume", "assemblyai"].forEach(p => { body[p] = $("#rate-" + p).value.trim(); });
+  const d = await busy("saving…", async () =>
+    (await fetch("/api/spend/rates", {method: "POST",
+      headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)})).json());
+  stage(d.ok ? "rates saved" : d.why);
+  if (d.ok) spendLog();
+}
+window.saveRates = saveRates;
+
+async function clearSpend(){
+  const d = await busy("clearing…", async () =>
+    (await fetch("/api/spend/clear", {method: "POST"})).json());
+  stage("cleared " + d.removed + " logged calls");
+  spendLog();
+}
+window.clearSpend = clearSpend;
 
 async function showCache(){
   const c = await (await fetch("/api/cache")).json();

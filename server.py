@@ -62,9 +62,105 @@ MAX_TEXT = 2000
 # THE VERSION THIS FILE IS. Bumped by hand in the same edit that bumps the installer, and checked
 # against it by G1 — two numbers that must agree is a lie waiting to happen, so the gate compares
 # them rather than trusting anybody to remember.
-EDITION = "v2.7"
+EDITION = "v2.8"
 
 RAW = "https://raw.githubusercontent.com/markoboskoauroville/SAMPLE_PLAYER_MACOS/main"
+
+SPEND_FILE = os.path.join(APPDIR, "spend.jsonl")
+RATES_FILE = os.path.join(APPDIR, "rates.json")
+
+# WHAT EACH PROVIDER IS BILLED IN, and it is a different unit for each one, so a single number
+# would be three numbers added together wrongly.
+#
+#   Speechify bills CHARACTERS, and every synthesis reply carries `billable_characters_count`.
+#   Hume bills by the SECOND, and every generation carries its own `duration`.
+#   AssemblyAI bills by the audio HOUR, and a finished transcript carries `audio_duration`.
+#
+# All three are facts the provider states about the call that was just made. None of them is an
+# estimate, which is the whole reason the log is worth keeping.
+UNITS = {"speechify": "characters", "hume": "seconds", "assemblyai": "seconds of audio"}
+
+# THE RATES DEFAULT TO ZERO AND ARE ASKED FOR RATHER THAN GUESSED.
+#
+# I do not know what Baba pays. Published API prices change, they differ per plan, and several of
+# these accounts are on terms I cannot see from here — so a number invented here would appear on
+# screen looking exactly as authoritative as the character count beside it, which IS measured.
+#
+# Units are logged always. Money appears only once a rate has been entered, and until then the box
+# shows what was actually consumed, which is the honest half.
+DEFAULT_RATES = {"speechify": 0.0, "hume": 0.0, "assemblyai": 0.0}
+
+
+def rates():
+    if os.path.isfile(RATES_FILE):
+        try:
+            return dict(DEFAULT_RATES, **json.load(open(RATES_FILE, encoding="utf-8")))
+        except Exception:
+            pass
+    return dict(DEFAULT_RATES)
+
+
+def log_spend(provider, units, detail):
+    """
+    One line per billable call, appended and never rewritten.
+
+    JSON LINES RATHER THAN A DATABASE OR ONE BIG ARRAY. An append cannot corrupt what is already
+    there, a half-written last line is one lost call rather than a lost file, and the whole thing
+    can be read in a text editor when something looks wrong — which is the only reason to keep a
+    log at all.
+
+    NO KEY, NO ACCOUNT NAME, NOT EVEN A FINGERPRINT. What was spent is a fact about the work; which
+    of twenty-one accounts paid for it is not something this file needs to hold, and a log that
+    grows for months is exactly the file not to put credentials near.
+    """
+    if not units:
+        return
+    os.makedirs(APPDIR, exist_ok=True)
+    row = {"at": int(time.time()), "provider": provider,
+           "units": round(float(units), 3), "detail": detail[:80]}
+    with open(SPEND_FILE, "a", encoding="utf-8") as f:
+        f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def spend_rows():
+    if not os.path.isfile(SPEND_FILE):
+        return []
+    out = []
+    for line in open(SPEND_FILE, encoding="utf-8", errors="replace"):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            out.append(json.loads(line))
+        except Exception:
+            # A torn last line is skipped rather than taking the file down with it.
+            continue
+    return out
+
+
+def spend_totals():
+    """
+    THE TOTAL IS DERIVED FROM THE LOG AND NEVER STORED BESIDE IT.
+
+    A running total kept as its own number is a number that can disagree with the log, and the day
+    it does there is no way to tell which one is lying. Clearing the log therefore empties the box
+    by arithmetic rather than by a second thing having to be remembered.
+    """
+    r = rates()
+    per = {}
+    for row in spend_rows():
+        p = row.get("provider", "?")
+        d = per.setdefault(p, {"calls": 0, "units": 0.0, "unit": UNITS.get(p, "units")})
+        d["calls"] += 1
+        d["units"] += float(row.get("units") or 0)
+    money = 0.0
+    for p, d in per.items():
+        d["units"] = round(d["units"], 2)
+        d["rate"] = r.get(p, 0.0)
+        d["cost"] = round(d["units"] * d["rate"], 4)
+        money += d["cost"]
+    return per, round(money, 4)
+
 
 CACHE = os.path.join(APPDIR, "cache")
 VOICE_CACHE = os.path.join(CACHE, "audio")
@@ -518,6 +614,8 @@ def transcribe(path):
                 return None, explain(code, body)
             d = json.loads(body)
             if d.get("status") == "completed":
+                log_spend("assemblyai", d.get("audio_duration") or 0,
+                          os.path.basename(path))
                 text = (d.get("text") or "").strip()
                 return (text, "") if text else (None, "nothing heard")
             if d.get("status") == "error":
@@ -659,6 +757,14 @@ def speak(engine, voice_id, model, text, direction=""):
             b64 = d.get(field) or (d.get("generations") or [{}])[0].get("audio")
             if not b64:
                 return None, "no audio in the reply"
+            # WHAT THE PROVIDER SAYS IT BILLED, not what we think it should have. Speechify counts
+            # the characters it actually charged for; Hume states the duration it produced.
+            if engine == "speechify":
+                log_spend("speechify", d.get("billable_characters_count") or len(text),
+                          text[:60])
+            else:
+                gens = d.get("generations") or [{}]
+                log_spend("hume", gens[0].get("duration") or 0, text[:60])
             return base64.b64decode(b64), ""
         if is_dead_answer(code, body):
             condemn(c["key"])
@@ -1384,6 +1490,83 @@ def status_word(code, body):
     if is_dead_answer(code, body):
         return "refused"
     return "unknown"
+
+
+@app.route("/api/spend")
+def spend():
+    per, money = spend_totals()
+    return jsonify({"per": per, "money": money, "rates": rates(),
+                    "rows": spend_rows()[-500:], "count": len(spend_rows())})
+
+
+@app.route("/api/spend/clear", methods=["POST"])
+def spend_clear():
+    """Clearing the log empties the box, because the box was only ever the log added up."""
+    n = len(spend_rows())
+    if os.path.isfile(SPEND_FILE):
+        os.remove(SPEND_FILE)
+    return jsonify({"ok": True, "removed": n})
+
+
+@app.route("/api/spend/rates", methods=["POST"])
+def spend_rates():
+    b = request.get_json(force=True) or {}
+    r = rates()
+    for k in DEFAULT_RATES:
+        if k in b:
+            try:
+                r[k] = float(b[k])
+            except (TypeError, ValueError):
+                return jsonify({"ok": False, "why": "%s is not a number" % k})
+    tmp = RATES_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(r, f)
+    os.replace(tmp, RATES_FILE)
+    return jsonify({"ok": True, "rates": r})
+
+
+@app.route("/api/keys/credit", methods=["POST"])
+def key_credit():
+    """
+    HAS THIS HUME ACCOUNT GOT CREDIT.
+
+    HUME IS THE ONLY PROVIDER HERE THAT CAN ANSWER THIS, and it does not answer it directly.
+    Probed on 30.8.2026: `/v0/usage`, `/v0/billing` and `/v0/account` are all 404, AssemblyAI's
+    `/v2/account` returns an empty object, Speechify has no usage surface at all, and Anthropic's
+    usage report needs an Admin key which is a different key from the one in the note. So there is
+    no balance to read anywhere.
+
+    What Hume does is refuse: a synthesis on an exhausted account answers `400 E0300 zero_credits`.
+    So the test is the cheapest possible real call — one word — and the answer is the refusal or
+    the absence of it. It costs a word of synthesis when the account is alive and nothing at all
+    when it is not, which is the direction that matters.
+    """
+    want = (request.get_json(force=True) or {}).get("masked")
+    if not os.path.isfile(KEYS_FILE):
+        return jsonify({"ok": False, "why": "no keys"})
+    for cred in parse_keys(open(KEYS_FILE, encoding="utf-8", errors="replace").read()):
+        if masked(cred["key"]) != want:
+            continue
+        if cred["provider"] != "hume":
+            return jsonify({"ok": False,
+                            "why": "only Hume can be asked this — nothing else publishes it"})
+        code, body = http(
+            "POST", "https://api.hume.ai/v0/tts",
+            {"X-Hume-Api-Key": cred["key"], "Content-Type": "application/json"},
+            json.dumps({"utterances": [{"text": "Hi."}], "format": {"type": "wav"},
+                        "num_generations": 1}).encode(),
+        )
+        if 200 <= code < 300:
+            d = json.loads(body)
+            gens = d.get("generations") or [{}]
+            log_spend("hume", gens[0].get("duration") or 0, "credit test")
+            return jsonify({"ok": True, "state": "has credit", "why": "has credit"})
+        b = body.decode("utf-8", "replace").lower()
+        if "credit" in b or "e0300" in b:
+            return jsonify({"ok": True, "state": "exhausted",
+                            "why": "out of credit — safe to delete"})
+        return jsonify({"ok": True, "state": "unknown", "why": explain(code, body)})
+    return jsonify({"ok": False, "why": "no such key"})
 
 
 @app.route("/api/keys/test", methods=["POST"])

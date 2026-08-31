@@ -14,6 +14,7 @@ account gets buried.
 
 import base64
 import importlib.util
+import json
 import os
 import shutil
 import struct
@@ -297,6 +298,97 @@ class Cache(unittest.TestCase):
         k = S.cache_key("preview", "hume", "v1", "", "secret line", "")
         self.assertEqual(len(k), 32)
         self.assertNotIn("secret", k)
+
+
+class Spend(unittest.TestCase):
+    """
+    The log is the box and the box is the log. A running total kept beside it is a number that can
+    disagree with the lines it came from, and the day it does there is no way to tell which lies.
+    """
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.old_spend, self.old_rates = S.SPEND_FILE, S.RATES_FILE
+        S.SPEND_FILE = os.path.join(self.dir, "spend.jsonl")
+        S.RATES_FILE = os.path.join(self.dir, "rates.json")
+        S.APPDIR = self.dir
+
+    def tearDown(self):
+        S.SPEND_FILE, S.RATES_FILE = self.old_spend, self.old_rates
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def test_nothing_logged_is_nothing_spent(self):
+        per, money = S.spend_totals()
+        self.assertEqual(per, {})
+        self.assertEqual(money, 0.0)
+
+    def test_a_call_is_one_line(self):
+        S.log_spend("speechify", 120, "Danas je lijep dan")
+        self.assertEqual(len(S.spend_rows()), 1)
+
+    def test_units_add_up_per_provider(self):
+        S.log_spend("speechify", 100, "a")
+        S.log_spend("speechify", 50, "b")
+        S.log_spend("hume", 3.5, "c")
+        per, _ = S.spend_totals()
+        self.assertEqual(per["speechify"]["units"], 150)
+        self.assertEqual(per["speechify"]["calls"], 2)
+        self.assertEqual(per["hume"]["units"], 3.5)
+
+    def test_each_provider_keeps_its_own_unit(self):
+        # Characters and seconds added together would be a number that means nothing.
+        S.log_spend("speechify", 100, "a")
+        S.log_spend("hume", 10, "b")
+        per, _ = S.spend_totals()
+        self.assertNotEqual(per["speechify"]["unit"], per["hume"]["unit"])
+
+    def test_money_is_zero_until_a_rate_is_entered(self):
+        S.log_spend("speechify", 1000, "a")
+        _, money = S.spend_totals()
+        self.assertEqual(money, 0.0)
+
+    def test_money_appears_once_a_rate_is_entered(self):
+        S.log_spend("speechify", 1000, "a")
+        with open(S.RATES_FILE, "w") as f:
+            json.dump({"speechify": 0.00002}, f)
+        per, money = S.spend_totals()
+        self.assertAlmostEqual(per["speechify"]["cost"], 0.02, places=4)
+        self.assertAlmostEqual(money, 0.02, places=4)
+
+    def test_a_zero_call_is_not_logged(self):
+        # A refused call bills nothing, and a row saying zero is a row that has to be read to
+        # discover it says nothing.
+        S.log_spend("hume", 0, "refused")
+        self.assertEqual(S.spend_rows(), [])
+
+    def test_a_torn_last_line_does_not_take_the_file_down(self):
+        S.log_spend("speechify", 100, "good")
+        with open(S.SPEND_FILE, "a") as f:
+            f.write('{"at": 1, "provider": "hu')
+        self.assertEqual(len(S.spend_rows()), 1)
+
+    def test_the_log_holds_no_key_and_no_account(self):
+        # What was spent is a fact about the work. Which of twenty-one accounts paid for it is not
+        # something a file that grows for months needs to hold.
+        S.log_spend("hume", 2, "Danas je lijep dan")
+        row = S.spend_rows()[0]
+        self.assertEqual(sorted(row.keys()), ["at", "detail", "provider", "units"])
+
+    def test_the_detail_is_capped(self):
+        S.log_spend("speechify", 10, "x" * 500)
+        self.assertLessEqual(len(S.spend_rows()[0]["detail"]), 80)
+
+    def test_clearing_empties_the_box_by_arithmetic(self):
+        S.log_spend("speechify", 100, "a")
+        os.remove(S.SPEND_FILE)
+        per, money = S.spend_totals()
+        self.assertEqual(per, {})
+        self.assertEqual(money, 0.0)
+
+    def test_a_corrupt_rates_file_falls_back_rather_than_raising(self):
+        with open(S.RATES_FILE, "w") as f:
+            f.write("not json at all")
+        self.assertEqual(S.rates(), S.DEFAULT_RATES)
 
 
 class Text(unittest.TestCase):
