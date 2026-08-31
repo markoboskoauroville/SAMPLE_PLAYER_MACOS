@@ -62,7 +62,7 @@ MAX_TEXT = 2000
 # THE VERSION THIS FILE IS. Bumped by hand in the same edit that bumps the installer, and checked
 # against it by G1 — two numbers that must agree is a lie waiting to happen, so the gate compares
 # them rather than trusting anybody to remember.
-EDITION = "v2.9"
+EDITION = "v3.0"
 
 RAW = "https://raw.githubusercontent.com/markoboskoauroville/SAMPLE_PLAYER_MACOS/main"
 
@@ -1588,10 +1588,9 @@ WORK_PROBES = {
                   lambda c: json.dumps({
                       "model": first_model(c) or "claude-3-5-haiku-20241022", "max_tokens": 1,
                       "messages": [{"role": "user", "content": "hi"}]}).encode()),
-    # ASSEMBLYAI HAS NO CHEAP WORK CALL. Transcription needs audio uploaded and is billed by the
-    # hour, so there is no fraction of a cent to spend asking. Its list call is used instead, and
-    # a billing message on it is still read — which is the honest limit rather than a probe that
-    # costs real money every time somebody presses Test.
+    # ASSEMBLYAI IS NOT IN THIS TABLE because its probe is three requests rather than one — the
+    # audio has to be uploaded before it can be submitted. It has its own function, and it is a
+    # real work probe like the rest: see assemblyai_probe.
 }
 
 
@@ -1637,12 +1636,76 @@ def first_model(cred):
     return None
 
 
+def probe_clip():
+    """
+    A SECOND OF AUDIO THIS APP MAKES ITSELF, for asking AssemblyAI whether it can work.
+
+    WHY THIS EXISTS. Every other provider can be asked to do a fraction of a cent of work in one
+    request. AssemblyAI cannot: it transcribes, so a work probe needs AUDIO, and there is no
+    audio lying around when somebody presses Test on a fresh install. So the app makes some.
+
+    MEASURED 30.8.2026 with a real key: a one-second generated clip uploads, submits, and comes
+    back `completed` in about two seconds with `audio_duration: 1`. That is one second of audio
+    billed — a hundred-thousandth of an hour — which is the same order as the word of speech every
+    other probe spends.
+
+    A TONE RATHER THAN SILENCE. Both work today; silence completes just as happily. But silence is
+    indistinguishable from a broken encoder, and the day a provider starts rejecting empty audio,
+    the failure would look exactly like a dead key. A tone is unambiguously sound.
+
+    440 Hz because it is A above middle C, which is the note every tuning fork in the world makes
+    and therefore the least arbitrary number available.
+    """
+    import math
+    rate = 16000
+    frames = rate  # one second
+    samples = [int(8000 * math.sin(2 * math.pi * 440 * i / rate)) for i in range(frames)]
+    data = struct.pack("<%dh" % frames, *samples)
+    return (b"RIFF" + struct.pack("<I", 36 + len(data)) + b"WAVEfmt " +
+            struct.pack("<IHHIIHH", 16, 1, 1, rate, rate * 2, 2, 16) +
+            b"data" + struct.pack("<I", len(data)) + data)
+
+
+def assemblyai_probe(cred):
+    """
+    Upload a second of tone, submit it, and see which of the three stages refuses.
+
+    THE MONEY ANSWER CAN ARRIVE AT ANY OF THE THREE. Upload, submit and poll are three separate
+    requests to three endpoints, and a provider is free to refuse at whichever it notices first.
+    Checking only the last one is how a probe reports "unknown" for an account that said plainly
+    at the first step that it was out of funds.
+
+    It does NOT poll to completion. The submit being accepted is the question — whether the
+    transcription then finds words in a sine wave is not.
+    """
+    auth = {"authorization": cred["key"]}
+    code, body = http("POST", "https://api.assemblyai.com/v2/upload", auth, probe_clip())
+    if code >= 300:
+        if sounds_like_money(body):
+            return "no credit", "account live, free credit spent \u2014 it needs a paid plan"
+        return status_word(code, body), explain(code, body)
+
+    url = json.loads(body).get("upload_url")
+    code, body = http("POST", "https://api.assemblyai.com/v2/transcript",
+                      dict(auth, **{"Content-Type": "application/json"}),
+                      json.dumps({"audio_url": url, "language_code": "en"}).encode())
+    if code >= 300:
+        if sounds_like_money(body):
+            return "no credit", "account live, free credit spent \u2014 it needs a paid plan"
+        return status_word(code, body), explain(code, body)
+
+    log_spend("assemblyai", 1, "key test")
+    return "working", "working, and it has credit"
+
+
 def work_probe(cred):
     """
     Ask the provider to do the smallest real thing it sells.
 
     Returns (state, sentence) or None when there is no cheap probe for that provider.
     """
+    if cred["provider"] == "assemblyai":
+        return assemblyai_probe(cred)
     probe = WORK_PROBES.get(cred["provider"])
     if not probe:
         return None

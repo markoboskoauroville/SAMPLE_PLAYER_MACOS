@@ -300,6 +300,71 @@ class Cache(unittest.TestCase):
         self.assertNotIn("secret", k)
 
 
+class ProbeClip(unittest.TestCase):
+    """
+    The second of audio the app makes for asking AssemblyAI whether it can work.
+
+    Every other provider is asked for a fraction of a cent of work in one request. AssemblyAI
+    transcribes, so its probe needs AUDIO, and there is none lying around on a fresh install.
+    """
+
+    def test_it_is_a_readable_wav(self):
+        d = tempfile.mkdtemp()
+        try:
+            p = os.path.join(d, "probe.wav")
+            with open(p, "wb") as f:
+                f.write(S.probe_clip())
+            off, rate, frames = S.wav_layout(p)
+            self.assertEqual(off, 44)
+            self.assertEqual(rate, 16000)
+            self.assertEqual(frames, 16000)
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_it_is_exactly_one_second(self):
+        d = tempfile.mkdtemp()
+        try:
+            p = os.path.join(d, "probe.wav")
+            with open(p, "wb") as f:
+                f.write(S.probe_clip())
+            self.assertEqual(S.length_ms(p), 1000)
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_it_is_sound_rather_than_silence(self):
+        # Both work today. Silence is indistinguishable from a broken encoder, and the day a
+        # provider starts rejecting empty audio the failure would look exactly like a dead key.
+        d = tempfile.mkdtemp()
+        try:
+            p = os.path.join(d, "probe.wav")
+            with open(p, "wb") as f:
+                f.write(S.probe_clip())
+            samples, _ = S.read_samples(p)
+            self.assertGreater(max(abs(v) for v in samples), 1000)
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_it_does_not_clip(self):
+        # A probe that arrives distorted is a probe that invites a different explanation for a
+        # failure than the one that happened.
+        d = tempfile.mkdtemp()
+        try:
+            p = os.path.join(d, "probe.wav")
+            with open(p, "wb") as f:
+                f.write(S.probe_clip())
+            samples, _ = S.read_samples(p)
+            self.assertLess(max(abs(v) for v in samples), 32000)
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_it_is_the_same_every_time(self):
+        # A probe that differs run to run is one that cannot be compared with a previous run.
+        self.assertEqual(S.probe_clip(), S.probe_clip())
+
+    def test_it_is_small_enough_to_upload_in_a_moment(self):
+        self.assertLess(len(S.probe_clip()), 64 * 1024)
+
+
 class Spend(unittest.TestCase):
     """
     The log is the box and the box is the log. A running total kept beside it is a number that can
