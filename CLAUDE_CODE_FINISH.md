@@ -52,12 +52,16 @@ company network, so Part 0.3 is measured before anything depends on it.
   **outbound port 22 is blocked** (his words, 11.9.2026). Measure the rest instead of assuming, each with
   a deadline, and write the answers into the log:
 
-      nc -vz -w 6 130.61.181.83 22                                          expected: blocked
-      nc -vz -w 6 130.61.181.83 443                                         the machine's Caddy
+      nc -vz -G 6 -w 6 130.61.181.83 22                                     expected: blocked
+      nc -vz -G 6 -w 6 130.61.181.83 443                                    the machine's Caddy
       curl -sS -m 10 -o /dev/null -w '%{http_code}\n' https://ttt-lll.pages.dev/portal/api/health
       curl -sS -m 10 -o /dev/null -w '%{http_code}\n' https://iaas.eu-frankfurt-1.oraclecloud.com/
       curl -sS -m 10 -o /dev/null -w '%{http_code}\n' https://api.cloudflare.com/client/v4/
-      nc -vz -w 6 instance-console.eu-frankfurt-1.oci.oraclecloud.com 443
+      nc -vz -G 6 -w 6 instance-console.eu-frankfurt-1.oci.oraclecloud.com 443
+
+  **On a Mac `-w` alone does not bound the connect**: `nc -w 6` to a blocked port waits the kernel's 75
+  seconds; `-G 6` stops it at six. (Until 11.9.2026 evening the three lines above had `-w 6` alone;
+  hotspot.sh hung on it and was fixed the same way.)
       scutil --proxy | grep -E 'Enable|Port'                                is there a system proxy
       env | grep -io '^[a-z_]*proxy[a-z_]*' | sort -u                         proxy variable NAMES only
 
