@@ -70,7 +70,7 @@ company network, so Part 0.3 is measured before anything depends on it.
 
 ## PART 1 — ONE BUG THE CHAT SESSION SHIPPED IN v3.2
 
-- [ ] **1.1 Two transforms at once overwrite each other's files.** Found 11.9.2026 while writing this
+- [x] **1.1 Two transforms at once overwrite each other's files.** Found 11.9.2026 while writing this
   brief, after delivery. The server runs threaded (`app.run(... threaded=True)`), and
   `transform_cell` writes the clone's audio to fixed names, `~/.sampleplayer-web/tmp-transform/clone.mp3`
   and `clone.wav`. Two cells transformed together read each other's clone. Separately, the same cell
@@ -365,3 +365,10 @@ Each session adds a line: date, what was ticked, commits, what is blocking.
                     No proxy and no TLS inspection seen, so oci and cloudflared need no extra
                     variables. The Oracle API is reachable, so the resize in 4.4 needs no route to
                     the machine. Only a shell on the machine is blocked.
+               1.1  the test (tests/test_server.py TwoAtOnce) was red on v3.2: both cells peaked at
+                    the loud clip's 13,345, and tmp-transform/ was left behind. After the fix: quiet
+                    1,950, loud 13,345, nothing left. Gate "two transforms at once cannot share a
+                    temporary file" seen red by putting each fixed name back. 137 tests, 56 checks.
+                    Source 254,009 bytes: 5,991 remain of 260,000. Written into DEVELOPMENT.md and
+                    DELIVERY_RECORD.md. Noticed on the way: the renderer test says "atempo" on this
+                    Mac's ffmpeg 9.0.1, so Homebrew's build has no rubberband (2.4 will confirm).

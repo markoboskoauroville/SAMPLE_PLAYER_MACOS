@@ -292,6 +292,11 @@ check("G6", "only .wav files are counted as generated voices",
 check("G2", "the local engine has no key, no probe and no spend line",
       len(local) > 10000 and not any(w in local for w in ("ring(", "log_spend(", "work_probe(", "KEYS_FILE", "condemn(")),
       "%d characters of the transform section examined" % len(local))
+writer = body_of("write_wav")
+check("G6", "two transforms at once cannot share a temporary file",
+      "mkdtemp(" in transform and "rmtree(" in transform and 'join(APPDIR, "tmp-transform")' not in transform
+      and "mkstemp(" in writer and 'path + ".tmp"' not in writer,
+      "a folder per request, removed at the end; write_wav through mkstemp. A fixed name here is red")
 skip("G6", "the soak and the monkey", "needs a Mac with a microphone and a browser")
 
 # ── G7 BUDGETS ────────────────────────────────────────────────────────────────────────────────

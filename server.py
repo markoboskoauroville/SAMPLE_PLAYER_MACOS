@@ -34,6 +34,7 @@ import socket
 import struct
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -356,11 +357,13 @@ def read_samples(path):
 
 
 def write_wav(path, samples, rate):
-    """A temporary file and a rename. This is the one file that cannot be made again."""
+    """A temporary file OF ITS OWN and a rename. This is the one file that cannot be made again, and
+    two writers at once (one cell transformed from two tabs) must each finish a whole file."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = path + ".tmp"
+    fd, tmp = tempfile.mkstemp(prefix=os.path.basename(path) + ".", suffix=".tmp", dir=os.path.dirname(path))
+    os.chmod(tmp, 0o644)
     data = struct.pack("<%dh" % len(samples), *samples)
-    with open(tmp, "wb") as f:
+    with os.fdopen(fd, "wb") as f:
         f.write(b"RIFF")
         f.write(struct.pack("<I", 36 + len(data)))
         f.write(b"WAVEfmt ")
@@ -1778,30 +1781,35 @@ def transform_cell(pid, slot, voice):
     if code != 200 or not mp3:
         return None, "could not fetch the clone's audio (HTTP %d)" % code
 
-    tmp = os.path.join(APPDIR, "tmp-transform")
-    os.makedirs(tmp, exist_ok=True)
-    mp3_path, theirs_wav = os.path.join(tmp, "clone.mp3"), os.path.join(tmp, "clone.wav")
-    with open(mp3_path, "wb") as fh:
-        fh.write(mp3)
+    # ONE FOLDER PER TRANSFORM, gone when it ends. The server is threaded, and a fixed folder had two
+    # cells transformed together read each other's clone (found 11.9.2026, after v3.2 shipped).
+    os.makedirs(APPDIR, exist_ok=True)
+    tmp = tempfile.mkdtemp(prefix="tmp-transform-", dir=APPDIR)
     try:
-        r = subprocess.run([ff, "-hide_banner", "-loglevel", "error", "-y", "-i", mp3_path, "-ac", "1",
-                            "-ar", str(RATE), "-c:a", "pcm_s16le", theirs_wav], capture_output=True, timeout=60)
-    except (OSError, subprocess.SubprocessError) as e:
-        return None, "ffmpeg did not run: %s" % str(e)[:120]
-    if r.returncode != 0:
-        return None, "ffmpeg could not read the clone's audio"
+        mp3_path, theirs_wav = os.path.join(tmp, "clone.mp3"), os.path.join(tmp, "clone.wav")
+        with open(mp3_path, "wb") as fh:
+            fh.write(mp3)
+        try:
+            r = subprocess.run([ff, "-hide_banner", "-loglevel", "error", "-y", "-i", mp3_path, "-ac", "1",
+                                "-ar", str(RATE), "-c:a", "pcm_s16le", theirs_wav], capture_output=True, timeout=60)
+        except (OSError, subprocess.SubprocessError) as e:
+            return None, "ffmpeg did not run: %s" % str(e)[:120]
+        if r.returncode != 0:
+            return None, "ffmpeg could not read the clone's audio"
 
-    mine, rate = read_samples(wav)
-    theirs, trate = read_samples(theirs_wav)
-    if not mine or not theirs:
-        return None, "one of the two recordings is empty"
-    his_total, their_total = len(mine) / rate, len(theirs) / trate
-    his = snap_spans(mine, rate, _clean_spans([(w[1], w[2]) for w in words], his_total))
-    their = snap_spans(theirs, trate, _clean_spans([(t.get("t", 0), t.get("d", 0)) for t in tokens], their_total))
-    segs = plan_stretch(his, their, his_total, their_total)
-    track, filt, why = render_plan(ff, theirs_wav, their_total, segs, len(mine), rate)
-    if track is None:
-        return None, why
+        mine, rate = read_samples(wav)
+        theirs, trate = read_samples(theirs_wav)
+        if not mine or not theirs:
+            return None, "one of the two recordings is empty"
+        his_total, their_total = len(mine) / rate, len(theirs) / trate
+        his = snap_spans(mine, rate, _clean_spans([(w[1], w[2]) for w in words], his_total))
+        their = snap_spans(theirs, trate, _clean_spans([(t.get("t", 0), t.get("d", 0)) for t in tokens], their_total))
+        segs = plan_stretch(his, their, his_total, their_total)
+        track, filt, why = render_plan(ff, theirs_wav, their_total, segs, len(mine), rate)
+        if track is None:
+            return None, why
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
     engine = engine_for(voice)
     write_wav(generated(pid, slot, engine), track, rate)       # gen/, one level down: never original.wav

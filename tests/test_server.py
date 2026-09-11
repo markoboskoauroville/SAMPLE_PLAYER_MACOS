@@ -18,6 +18,7 @@ import json
 import os
 import shutil
 import struct
+import subprocess
 import sys
 import tempfile
 import types
@@ -974,6 +975,114 @@ class RenderAgainstTheClock(unittest.TestCase):
         print("\n      renderer %s: worst edge error %.1f ms over %d segments" % (filt, worst * 1000, len(segs)))
         self.assertLessEqual(worst, 0.015)
         shutil.rmtree(d)
+
+
+class TwoAtOnce(unittest.TestCase):
+    """
+    TWO TRANSFORMS AT THE SAME MOMENT, each against a stand-in MANTRA_VOICE that answers with its own
+    clip. Found 11.9.2026 after v3.2 shipped: the server runs threaded, and transform_cell wrote the
+    clone's audio to one fixed name, so two cells transformed together read each other's clone. The
+    two clips differ in loudness, a quiet tone and a loud one, and each output must carry its own.
+    A barrier at the decode step makes the collision certain rather than likely, so the test is red
+    on v3.2 every time and not one time in three. The barrier has a deadline; nothing here waits for ever.
+    """
+    RATE = 44100
+    SPANS = [(0.30, 0.60), (0.90, 1.30)]                    # his words and theirs at the same times: no stretch
+    WORDS = [{"w": "one", "t": 0.30, "d": 0.60}, {"w": "two", "t": 0.90, "d": 1.30}]
+    AMP = {"quiet": 2000, "loud": 14000}
+
+    @classmethod
+    def setUpClass(cls):
+        import http.server
+        import threading
+        ff = shutil.which("ffmpeg")
+        cls.home = tempfile.mkdtemp()
+        cls.mp3 = {}
+        for name, amp in cls.AMP.items():
+            wav = os.path.join(cls.home, name + ".wav")
+            S.write_wav(wav, bursts(cls.RATE, 2.0, cls.SPANS, amp=amp), cls.RATE)
+            subprocess.run([ff, "-hide_banner", "-loglevel", "error", "-y", "-i", wav, "-codec:a", "libmp3lame",
+                            "-b:a", "128k", wav[:-4] + ".mp3"], check=True, timeout=60)
+            cls.mp3[name] = open(wav[:-4] + ".mp3", "rb").read()
+        consent = {"who": "a friend", "when": "2026-09-10", "what_for": "a test", "usage": "private"}
+        mp3s, words = cls.mp3, cls.WORDS
+
+        class StandIn(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def answer(self, code, body, ctype="application/json"):
+                self.send_response(code); self.send_header("Content-Type", ctype)
+                self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
+
+            def do_GET(self):
+                if self.path == "/voices":
+                    self.answer(200, json.dumps({"voices": [{"name": n, "consent": consent} for n in mp3s]}).encode())
+                elif self.path.startswith("/audio/"):
+                    self.answer(200, mp3s[self.path[7:-4]], "audio/mpeg")
+                else:
+                    self.answer(404, b"{}")
+
+            def do_POST(self):
+                body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+                if self.path.startswith("/hear"):
+                    self.answer(200, json.dumps({"words": words}).encode())
+                elif self.path == "/say":
+                    v = json.loads(body)["voice"]
+                    self.answer(200, json.dumps({"engine": "clone", "voice": v, "tokens": words,
+                                                 "url": "/audio/%s.mp3" % v}).encode())
+                else:
+                    self.answer(404, b"{}")
+
+        cls.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), StandIn)
+        threading.Thread(target=cls.server.serve_forever, daemon=True).start()
+        cls.saved = (S.VOICE_API, S.APPDIR, S.DATA, S.subprocess.run)
+        S.VOICE_API = "http://127.0.0.1:%d" % cls.server.server_address[1]
+        S.APPDIR = os.path.join(cls.home, "app"); S.DATA = os.path.join(S.APPDIR, "data")
+        os.makedirs(S.APPDIR)
+        for slot in (1, 2):
+            S.write_wav(S.original("p", slot), bursts(cls.RATE, 2.0, cls.SPANS), cls.RATE)
+
+        # THE BARRIER: neither thread decodes its clone until both have fetched theirs. Without it
+        # the collision depends on the scheduler; with it, v3.2 fails every run.
+        barrier, real_run = threading.Barrier(2, timeout=30), S.subprocess.run
+
+        def gated(cmd, *a, **k):
+            if any(str(x).endswith(".mp3") for x in cmd):
+                barrier.wait()
+            return real_run(cmd, *a, **k)
+        S.subprocess.run = gated
+        cls.results = {}
+
+        def go(slot, voice):
+            cls.results[voice] = S.transform_cell("p", slot, voice)
+        threads = [threading.Thread(target=go, args=(1, "quiet")), threading.Thread(target=go, args=(2, "loud"))]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=120)
+        S.subprocess.run = real_run
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown(); cls.server.server_close()
+        S.VOICE_API, S.APPDIR, S.DATA, S.subprocess.run = cls.saved
+        shutil.rmtree(cls.home, ignore_errors=True)
+
+    def test_each_output_carries_its_own_clip(self):
+        for voice, (report, why) in self.results.items():
+            self.assertIsNotNone(report, "%s: %s" % (voice, why))
+        peak = {}
+        for slot, voice in ((1, "quiet"), (2, "loud")):
+            samples, _ = S.read_samples(S.generated("p", slot, "transform-" + voice))
+            peak[voice] = max(abs(v) for v in samples)
+        print("\n      two at once: quiet cell peaks at %d, loud cell at %d" % (peak["quiet"], peak["loud"]))
+        self.assertLess(peak["quiet"], 6000, "the quiet cell was given the loud clone's clip")
+        self.assertGreater(peak["loud"], 6000, "the loud cell was given the quiet clone's clip")
+
+    def test_nothing_temporary_is_left_behind(self):
+        left = [x for x in os.listdir(S.APPDIR) if x.startswith("tmp-transform")]
+        self.assertEqual(left, [], "a transform's temporary folder must be removed when it ends")
 
 
 if __name__ == "__main__":

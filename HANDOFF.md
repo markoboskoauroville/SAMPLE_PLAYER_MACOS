@@ -63,7 +63,8 @@ Identical to the phone, cell for cell, so a project directory copies between the
       cache/audio/<sha>.wav                   every generated sound
       voice-sources/<time>_<name>             recordings a cloned voice was cut from, kept so
                                               MANTRA_VOICE can cut it again
-      tmp-transform/                          the clone's line while a transform runs
+      tmp-transform-*/                        the clone's line while a transform runs: one folder
+                                              per transform, removed when it ends
       port.txt                                written at startup, read by the launcher
       data/projects/<id>/samples/NN/
         original.wav                          the recording. NEVER overwritten
@@ -320,8 +321,8 @@ The reasoning behind each is in the brief.
 
 ## RUNNING THE CHECKS
 
-    python3 tests/test_server.py     132 cases, no network, no browser (one needs ffmpeg)
-    python3 scripts/gates.py         55 checks, 2 honestly not run
+    python3 tests/test_server.py     137 cases, no network, no browser (three need ffmpeg)
+    python3 scripts/gates.py         56 checks, 2 honestly not run
 
 ## WHAT HAS NEVER BEEN PROVEN
 

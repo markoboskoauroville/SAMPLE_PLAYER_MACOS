@@ -109,6 +109,11 @@ Chromium, says to press q and start again.
 - **One "old version" check ran the new code**, because a worktree of `main` failed (MANTRA_VOICE's
   branch is `master`) and Python imported from the current folder. Caught by asserting the imported
   file's path before believing the result.
+- **Found after delivery, 11.9.2026, for the next edition: two transforms at once overwrote each
+  other's clone.** The server is threaded and the clone's audio went to one fixed folder. A test with
+  two threads and two clips of different loudness had both cells come out loud. Fixed with a folder
+  per transform and `mkstemp` in `write_wav`; a new gate refuses a fixed temporary name. Tests 137,
+  gates 56.
 
 ## NOT TESTED
 
@@ -125,7 +130,9 @@ Chromium, says to press q and start again.
 - **Long takes.** The longest take transformed was 3 seconds with 4 words. The edge snapping reads
   samples in pure Python; a 60-second take has not been timed.
 - **Two transforms of one cell at once**, from two tabs. Both write the same `gen/` file through a
-  temporary file and a rename, so the last one wins; not exercised.
+  temporary file and a rename, so the last one wins; not exercised. *11.9.2026: two DIFFERENT cells
+  at once is now a test, and it found the clone folder shared (see FAILED ON THE WAY). The same cell
+  twice is covered by `write_wav`'s own temporary name per writer, still not driven from two tabs.*
 
 ## KNOWN
 

@@ -173,6 +173,14 @@ public later does not make an old take public by surprise.
   tests went red: the 50 ms rule was never reached, because the words in that test joined into a phrase
   first. **And the mutation harness itself lied twice** until it ran with `PYTHONDONTWRITEBYTECODE=1`:
   stale bytecode attributed one mutation's failures to the next.
+- **Two transforms at once read each other's clone.** Found 11.9.2026 after v3.2 was delivered, on
+  the first day the code ran on the Mac. The server is threaded and `transform_cell` wrote the clone's
+  audio to one fixed folder, `tmp-transform/clone.mp3`; two cells transformed together decoded the
+  same file, and the test that proves it (two threads, two stand-in clips of different loudness, a
+  barrier at the decode so the collision is certain) had both cells peaking at the loud clip's 13,345.
+  Now a folder per transform from `tempfile.mkdtemp`, removed in a `finally`, and `write_wav` through
+  `mkstemp`, so the same cell from two tabs finishes two whole files and the last one wins. A gate
+  goes red if either fixed name comes back; seen red both ways.
 
 ### The stale-server case
 
