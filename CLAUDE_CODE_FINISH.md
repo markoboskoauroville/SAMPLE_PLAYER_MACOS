@@ -126,7 +126,7 @@ NOT TESTED as it moves.
   same measurement the tests run on tone bursts — `snap_spans` on the output against the planned
   segments — and write the worst edge error **on real speech**.
 
-- [ ] **2.7 A long take.** A 60-second take through the transform, timed. `snap_spans` reads samples in
+- [x] **2.7 A long take.** A 60-second take through the transform, timed. `snap_spans` reads samples in
   pure Python; if it takes more than a few seconds, make it faster **without adding a dependency**
   (the app's only dependency is Flask) and without passing the 260,000-byte budget: 6,599 bytes remain.
 
@@ -143,7 +143,7 @@ NOT TESTED as it moves.
   dimmed until the note is complete; ⤓ Download this audio on a private voice's take — the file in
   Downloads must be named `… (PRIVATE voice <name>, not for release).wav`.
 
-- [ ] **2.10 MANTRA_VOICE's own Voices page still adds a voice** (without a note, as before) and the
+- [x] **2.10 MANTRA_VOICE's own Voices page still adds a voice** (without a note, as before) and the
   voice shows red in Sample Player.
 
 - [ ] **2.11 Croatian: ask, do not build.** MANTRA_VOICE's `ears.py` fixes `language='en'`, so Path A
@@ -379,3 +379,7 @@ Each session adds a line: date, what was ticked, commits, what is blocking.
                     no longer depends on it); the rubberband 4.0.0 command is installed separately.
                     The transform uses atempo on this Mac. All in DELIVERY_RECORD.md, MEASURED ON
                     THE MAC. 2.2 waits on Baba: eight voices, none with a note.
+               2.7  a 60 s take of Baba's speech: hear 6.1 s, say 17.6 s (0.0 cached), transform
+                    9.7 s with the clone cached, snap_spans 0.1 s. Nothing to speed up; the premise
+                    was wrong and is recorded as measured. 2.10 /add without a note (the Voices
+                    page's request): 200, red in Sample Player, removed again.

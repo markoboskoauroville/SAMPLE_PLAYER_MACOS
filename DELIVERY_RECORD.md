@@ -136,6 +136,16 @@ day this code ran where it is meant to run. Each line is a thing that was on NOT
   says so. The renderer test measured 7.5 ms worst edge with atempo, the same as on Linux.
 - **Eight voices, none with a consent note**: actress1, gwyneth, marko, old_actor, rowan, snoop, voice,
   voice1. All show red. The notes are Baba's to give (brief 2.2).
+- **MANTRA_VOICE's add without a note, and the red badge.** `POST /add` with a name, a source and a
+  cut and no `consent` (what its own Voices page sends) answered 200 and listed the voice with no
+  note; Sample Player's `/api/clones` showed it as `no consent recorded`, release false. Removed with
+  `/remove`; the eight voices are as they were. The page itself was not clicked; its request was sent.
+- **A 60-second take through the transform.** 142 words heard in 6.1 s (4.7 s the second time; the
+  ears do not cache); the clone said them in 17.6 s the first time and 0.0 s cached; the transform
+  route, with the clone cached, took 9.7 s, of which the edge snapping in pure Python was 0.1 s and
+  the 73 ffmpeg calls of the render the rest. Output 60.000 s, exactly the take. **No speed-up was
+  needed**: the brief's worry about `snap_spans` did not survive measurement (on a synthetic 60 s take
+  with 150 words: read 0.03 s, snap 0.11 s, plan 0.00 s, write 0.04 s, render 5.7 s).
 
 ## NOT TESTED
 
@@ -152,7 +162,7 @@ day this code ran where it is meant to run. Each line is a thing that was on NOT
 - **MANTRA_VOICE under its LaunchAgent after a pull** — *measured 11.9.2026, see above* — and its own
   Voices page after the change.
 - **Long takes.** The longest take transformed was 3 seconds with 4 words. The edge snapping reads
-  samples in pure Python; a 60-second take has not been timed.
+  samples in pure Python; a 60-second take has not been timed. *11.9.2026: timed, see above. Moved.*
 - **Two transforms of one cell at once**, from two tabs. Both write the same `gen/` file through a
   temporary file and a rename, so the last one wins; not exercised. *11.9.2026: two DIFFERENT cells
   at once is now a test, and it found the clone folder shared (see FAILED ON THE WAY). The same cell
