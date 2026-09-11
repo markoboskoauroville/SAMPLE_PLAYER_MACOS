@@ -2073,19 +2073,9 @@ async function testKeys(masked){
 window.testKeys = testKeys;
 
 /*
-  ONLY HUME HAS THIS BUTTON, AND ONLY BECAUSE ONLY HUME CAN ANSWER.
-
-  Probed on 30.8.2026 with real keys for all six providers: Hume's /v0/usage, /v0/billing and
-  /v0/account are 404; AssemblyAI's /v2/account returns an empty object and every other spelling
-  is 404; Speechify has no usage surface at all; Anthropic's usage report needs an Admin key,
-  which is a different key from the one in the note. Nothing publishes a balance.
-
-  What Hume does is REFUSE: a synthesis on an exhausted account answers 400 E0300 zero_credits.
-  So the test is the cheapest real call there is — one word — and the answer is the refusal or the
-  absence of it. It costs a word when the account is alive and nothing at all when it is not,
-  which is the direction that matters when the question is which accounts to delete.
-
-  A button on the other five would return "I cannot tell you", every time, for ever.
+  ONLY HUME HAS THIS BUTTON, AND ONLY BECAUSE ONLY HUME CAN ANSWER. Probed 30.8.2026: nothing
+  publishes a balance; Hume REFUSES a one-word synthesis on an exhausted account (400 E0300), so
+  the test is one word, costing a word when alive and nothing when not. HANDOFF.md, "THE CENTRAL TRICK".
 */
 async function testCredit(masked, btn){
   const was = btn ? btn.textContent : null;

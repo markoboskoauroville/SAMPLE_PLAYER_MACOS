@@ -43,7 +43,8 @@
 ###############################################################################
 set -e
 
-RAW="https://raw.githubusercontent.com/markoboskoauroville/SAMPLE_PLAYER_MACOS/main"
+RAW_MAIN="https://raw.githubusercontent.com/markoboskoauroville/SAMPLE_PLAYER_MACOS/main"
+API="https://api.github.com/repos/markoboskoauroville/SAMPLE_PLAYER_MACOS/commits/main"
 INSTALLER="3sh_i_sample_player_v1_macos.sh"
 
 AMBER=$'\033[38;5;214m'; RED=$'\033[38;5;203m'; GREEN=$'\033[38;5;114m'
@@ -61,6 +62,22 @@ fail() {
 command -v curl >/dev/null 2>&1 || fail "curl is not here. Install the Xcode command line tools."
 
 printf '%s\n  fetching the newest Sample Player%s\n' "$AMBER" "$OFF"
+
+# ONE COMMIT, NOT THREE FILES FROM main. raw.githubusercontent.com caches every
+# file for 300 seconds on its own, and on 11.9.2026 an update run inside those
+# five minutes installed the v3.2 server and page with the v3.1 installer. A
+# commit's files never change, so main is resolved to a commit once (no key
+# needed, sixty calls an hour) and the three files are fetched from that. If
+# the API cannot be reached, main is used and it is said.
+SHA="$(curl -fsS -m 15 -H 'Accept: application/vnd.github+json' "$API" 2>/dev/null \
+       | sed -n 's/^ *"sha": *"\([0-9a-f]\{40\}\)".*/\1/p' | head -1)"
+if [ -n "$SHA" ]; then
+  RAW="https://raw.githubusercontent.com/markoboskoauroville/SAMPLE_PLAYER_MACOS/$SHA"
+  printf '  %scommit %s%s\n' "$DIM" "${SHA:0:7}" "$OFF"
+else
+  RAW="$RAW_MAIN"
+  printf '  %sGitHub did not say which commit main is at: fetching from main, which can mix\n  two versions for five minutes after a push%s\n' "$AMBER" "$OFF"
+fi
 
 mkdir -p "$TMP/static"
 get() {   # $1 path in the repo, $2 where to put it
@@ -115,7 +132,7 @@ cat > "$BIN/sampleplayer-update.new" << UPDEOF
 set -e
 TMP="\$(mktemp -d)"
 trap 'rm -rf "\$TMP"' EXIT
-curl -fsSL --retry 3 -o "\$TMP/update.sh" "$RAW/update.sh" || {
+curl -fsSL --retry 3 -o "\$TMP/update.sh" "$RAW_MAIN/update.sh" || {
   echo "could not reach GitHub. Nothing was changed."; exit 1; }
 bash -n "\$TMP/update.sh" || { echo "the update script did not parse."; exit 1; }
 bash "\$TMP/update.sh"

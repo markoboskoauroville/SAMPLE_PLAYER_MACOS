@@ -1,27 +1,7 @@
 #!/usr/bin/env python3
 """
-SAMPLE PLAYER — the macOS edition.
-
-A local Flask server and a web interface, run from the terminal. The same idea as the Android
-app: a set of cells, each holding one spoken phrase, transcribed and optionally re-voiced.
-
-WHAT IS DELIBERATELY THE SAME AS THE PHONE
-  the storage layout, cell for cell, so a project can be copied between them
-  WAV 44.1 kHz mono 16-bit, and the original recording is never overwritten
-  normalisation to -0.1 dBFS with a 20 dB gain ceiling
-  the quality check runs BEFORE normalisation
-  one key held for a whole transcription job, and a condemnation retries on the next key
-  the User-Agent set in one place, because api.hume.ai answers 403/1010 without one
-
-WHAT IS DIFFERENT, AND WHY
-  The browser records. macOS gives a page a microphone through getUserMedia, and the page
-  builds the WAV itself at 44.1/mono/16-bit rather than handing over webm/opus — so there is
-  no ffmpeg in the dependency list and the bytes that arrive are already the format the rest
-  of this reads.
-
-  There is no overlay and no background triangle. That whole mechanism exists because a phone
-  can only show one app at a time. A Mac shows the script and this window side by side, and
-  the keyboard does what the triangle did.
+SAMPLE PLAYER — the macOS edition. A local Flask server and a page, the same cells as the phone.
+What is the same as the phone and what is different, and why: DEVELOPMENT.md, Part One.
 """
 
 import base64
@@ -1293,25 +1273,10 @@ def do_speak(slot):
 
 # ────────────────────────────────────────────────────────────── voice transform ──
 #
-# PATH A: HIS PERFORMANCE, THEIR TIMBRE, USING ONLY WHAT IS ALREADY ON THIS MAC.
-#
-# MANTRA_VOICE (127.0.0.1:8837) clones by TEXT-TO-SPEECH. It has never heard the take, so what it
-# says has the model's rhythm, not his. Path A puts his rhythm back:
-#
-#   1  /hear?words=1 on his take        his words, each with a start and an END
-#   2  /say in the cloned voice         the same words, the model's rhythm, and the clone's own
-#                                       word times (the ears hear the clip back inside /say)
-#   3  both edges snapped to the audio  Whisper's word times are tens of milliseconds loose
-#   4  a plan                           each of their words onto his word's window, the silence
-#                                       either side absorbing what it can, a phrase where a word
-#                                       alone cannot be stretched cleanly
-#   5  rubberband, one segment at a time, laid on a silent track exactly as long as his take
-#
-# THE HONEST LIMIT. Past about 1.3x a stretched vowel smears, and below about 0.75x it chirps. The
-# plan reports every segment against those two numbers instead of hiding them, so the page can say
-# which words to listen to. Whether that matters on his voice against his picture is a question
-# for his ears, and the answer decides whether real speech-to-speech conversion (Path B) is needed.
-#
+# PATH A: HIS PERFORMANCE, THEIR TIMBRE. MANTRA_VOICE clones by text-to-speech and has never heard
+# the take, so his words are heard with their times, the clone says them, both sets of edges are
+# snapped to the sound, and each of their words is stretched onto his word's window. The five steps
+# and the honest limit (smear past 1.3x, chirp under 0.75x) are in DEVELOPMENT.md, "Path A".
 # A LOCAL ENGINE HAS NO KEY, NO CREDIT PROBE AND NO SPEND LINE, and none is bolted on here.
 
 VOICE_API = os.environ.get("MANTRA_VOICE_URL", "http://127.0.0.1:8837")
@@ -2062,31 +2027,11 @@ def test_credential(cred):
     return status_word(code, body), explain(code, body)
 
 
-# THE WORDS EVERY PROVIDER USES WHEN THE MONEY HAS RUN OUT, and they all use different ones.
-#
-#   Hume        400  E0300 / zero_credits / "Exhausted credit balance"
-#   Anthropic   400  "credit balance is too low"
-#   Gemini      429  RESOURCE_EXHAUSTED / "quota"
-#   Groq        429  rate_limit_exceeded, and on the free tier a day's allowance
-#   Speechify   402 or a message naming the plan
-#   AssemblyAI  a billing message on submit
-#
-# Matched as words rather than by code, because the CODE is the thing they disagree about: the
-# same fact is a 400 at Hume, a 402 at Speechify and a 429 at Google.
-# OUT OF CREDIT AND THROTTLED BOTH SAY "QUOTA", AND THEY ARE OPPOSITE FACTS.
-#
-# Measured on the real keys, 30.8.2026. Gemini answers a spent account with:
-#
-#     HTTP 429  RESOURCE_EXHAUSTED
-#     "Your prepayment credits are depleted."
-#
-# and answers a key that has simply been asked twice in one second with the SAME code and the same
-# word RESOURCE_EXHAUSTED — but with a `QuotaFailure` detail naming a per-minute quota and a
-# `RetryInfo` saying how long to wait.
-#
-# Reading the word alone would tell somebody to delete a live key because they pressed Test twice.
-# So the retry hint is checked FIRST and wins: anything that says how long to wait is saying come
-# back, not pay up.
+# THE WORDS EVERY PROVIDER USES WHEN THE MONEY HAS RUN OUT, and they all use different ones: Hume
+# 400 E0300, Anthropic 400 "credit balance", Gemini 429 RESOURCE_EXHAUSTED, Speechify 402. Matched
+# as words because the CODE is what they disagree about. Gemini says RESOURCE_EXHAUSTED for a spent
+# account AND for two requests in one second, so the retry hint (RetryInfo, QuotaFailure) is
+# checked FIRST and wins: measured 30.8.2026, HANDOFF.md "OUT OF CREDIT AND THROTTLED".
 STRONG_MONEY = (
     "credit", "e0300", "zero_credits", "balance", "depleted", "insufficient",
     "billing", "payment", "out of funds", "upgrade your plan", "prepayment",
@@ -2205,23 +2150,10 @@ def first_model(cred):
 
 def probe_clip():
     """
-    A SECOND OF AUDIO THIS APP MAKES ITSELF, for asking AssemblyAI whether it can work.
-
-    WHY THIS EXISTS. Every other provider can be asked to do a fraction of a cent of work in one
-    request. AssemblyAI cannot: it transcribes, so a work probe needs AUDIO, and there is no
-    audio lying around when somebody presses Test on a fresh install. So the app makes some.
-
-    MEASURED 30.8.2026 with a real key: a one-second generated clip uploads, submits, and comes
-    back `completed` in about two seconds with `audio_duration: 1`. That is one second of audio
-    billed — a hundred-thousandth of an hour — which is the same order as the word of speech every
-    other probe spends.
-
-    A TONE RATHER THAN SILENCE. Both work today; silence completes just as happily. But silence is
-    indistinguishable from a broken encoder, and the day a provider starts rejecting empty audio,
-    the failure would look exactly like a dead key. A tone is unambiguously sound.
-
-    440 Hz because it is A above middle C, which is the note every tuning fork in the world makes
-    and therefore the least arbitrary number available.
+    A SECOND OF AUDIO THIS APP MAKES ITSELF, for asking AssemblyAI whether it can work: it transcribes,
+    so its probe needs audio, and a fresh install has none. A tone, not silence, because silence is
+    indistinguishable from a broken encoder. One second is a hundred-thousandth of a billed hour.
+    Measured 30.8.2026: HANDOFF.md "WHEN A PROBE NEEDS AUDIO".
     """
     import math
     rate = 16000

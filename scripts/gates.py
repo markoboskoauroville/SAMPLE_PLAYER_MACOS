@@ -101,6 +101,10 @@ check("G1", "the server and the installer agree on the edition",
 check("G1", "the updater points at this repository",
       "SAMPLE_PLAYER_MACOS/main" in updater_src,
       "raw.githubusercontent path present")
+check("G1", "the updater resolves main to one commit and fetches from it",
+      "api.github.com/repos/markoboskoauroville/SAMPLE_PLAYER_MACOS/commits/main" in updater_src
+      and 'SAMPLE_PLAYER_MACOS/$SHA"' in updater_src and "$RAW_MAIN/update.sh" in updater_src,
+      "three files from one commit cannot mix versions; the wrapper still takes update.sh from main")
 check("G1", "the updater fetches exactly the three files that make the app",
       updater_src.count("get \"") == 3 or updater_src.count("get \"") >= 3,
       "installer, server, page")

@@ -166,7 +166,7 @@ NOT TESTED as it moves.
   push a trivial change and update within one minute — all three files must come from the same commit.
   If the API is unreachable, fall back to `main` and say so.
 
-- [ ] **3.2 A trim before the next feature.** 6,599 bytes of the 260,000 budget remain after v3.2 (and
+- [x] **3.2 A trim before the next feature.** 6,599 bytes of the 260,000 budget remain after v3.2 (and
   Part 1 will use some). Find what can go without losing a protection — long comments that repeat
   `DEVELOPMENT.md` are the likeliest — and record what was removed and why.
 
@@ -390,3 +390,10 @@ Each session adds a line: date, what was ticked, commits, what is blocking.
                     the transform ran to the end on the translation, tokens matching 6/6 times.
                     Cells 1 to 6 of project-01 hold those Croatian takes now. Four English lines
                     are still his to record, so 2.5, 2.6 and 2.8 stay open; 2.11 has its numbers.
+               3.1  update.sh resolves main to a commit through api.github.com and fetches the three
+                    files from raw.githubusercontent.com/…/<sha>/; falls back to main and says so;
+                    a G1 gate checks it. Run for real: "commit 4bba925", installed files identical
+                    to that commit. Its Test 4 (push a trivial change, update within a minute)
+                    needs a push to main, so the box waits for Baba's yes on 3.3.
+               3.2  4,219 bytes of comment that repeated DEVELOPMENT.md and HANDOFF.md cut to a
+                    line and a pointer: 250,831 bytes, 9,169 free. Tests 137, checks 57.

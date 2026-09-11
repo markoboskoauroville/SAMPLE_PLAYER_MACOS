@@ -182,6 +182,27 @@ public later does not make an old take public by surprise.
   `mkstemp`, so the same cell from two tabs finishes two whole files and the last one wins. A gate
   goes red if either fixed name comes back; seen red both ways.
 
+### The updater fetches one commit, not three files from `main` (11.9.2026, for v3.3)
+
+`update.sh` asks `api.github.com/repos/…/commits/main` for the commit `main` is at (no key, sixty
+calls an hour, GitHub's own cache on that answer is 60 seconds) and fetches the installer, the server
+and the page from `raw.githubusercontent.com/…/<sha>/`. A commit's files never change, so the
+five-minute window in which the old updater could install half of two versions is closed. Every
+refusal stays: size, shebang, `bash -n`, `ast.parse`, doctype. If the API does not answer, the three
+files come from `main` and the updater says so in amber. The `sampleplayer-update` command it leaves
+behind still fetches `update.sh` itself from `main`, so for five minutes after a push the updater
+that runs may be the previous one; the three files it installs are still one commit's. Run for real
+on this Mac: "commit 4bba925", all three intact, the installed files byte-identical to that commit.
+
+### The trim before v3.3 (11.9.2026)
+
+4,219 bytes of comment removed, no code and no protection: the server's module docstring (every
+line of it is DEVELOPMENT.md Part One), the voice-transform header (the five steps and the limit are
+in "Path A" above), the money-words essay and the probe-clip docstring (both measured 30.8.2026 and
+written up in HANDOFF.md), and the page's credit-button comment (HANDOFF.md, "THE CENTRAL TRICK").
+Each was cut to its one-line reason and a pointer to the document that holds the rest. The budget:
+250,831 of 260,000 bytes, 9,169 free.
+
 ### The stale-server case
 
 `sampleplayer-update` run in a second terminal replaces the page on disk while the panel's old server
