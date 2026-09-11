@@ -515,6 +515,20 @@ Each session adds a line: date, what was ticked, commits, what is blocking.
     11.9.2026  Baba: the recording cell's left corner counts the seconds with a V meter above.
                Added to v3.4 (59 checks, seen red; not looked at, needs a microphone). Still not
                pushed with the rest of v3.4.
+    11.9.2026  END OF THE DAY. v3.4 pushed with Baba's yes (main at 5953032): a second click stops,
+               "mode:" small on the left, the gear bare on the right, the recording corner with
+               seconds and a level meter. NOT yet installed on his Mac: press u in the panel, or
+               sampleplayer-update. WHERE TO CONTINUE: (1) Baba listens to ~/Desktop/clone-test
+               (three subfolders: cell 7 4.7 s, cell 8 52.9 s, cell 8 first 14.6 s cut; file 1 is
+               qwen06, 3 is chatterbox, 2 is the larger qwen, not downloaded) and says which clone
+               is usable; cell 8's words were transcribed, not typed ("Clod code" where the ears
+               hear "code code"), so if he gives the right words the cut runs again. Only then does
+               anything in MANTRA_VOICE change. (2) Path A (2.5, 2.6, 2.8, 2.9, 5.4) stays stopped
+               until the cloning is right. (3) He says the day he upgraded Oracle: write it into
+               4.6. (4) On a hotspot: the list under Part 4. The controlled-test script is
+               clone_test.py in the session's scratchpad; it is small and can be rewritten from
+               its description in the log if the scratchpad is gone (Engine from clone.py, the
+               reference pointed at a wav and its words, every downloaded model, one folder).
     11.9.2026  BABA STOPPED PATH A: "The cloned voices are bad on their own, before any transform.
                Stop all Path A work. Fix the cloning first, measuring, not guessing." 2.5, 2.6, 2.8,
                2.9 and Part 5.4 wait until the cloning is right; nothing in MANTRA_VOICE changes
