@@ -2,15 +2,15 @@
 
 **The finished state of the app. Nothing about how it got here.**
 
-Installer edition v3.1. Repository public at `markoboskoauroville/SAMPLE_PLAYER_MACOS`.
+Installer edition v3.2. Repository public at `markoboskoauroville/SAMPLE_PLAYER_MACOS`.
 
 Every decision and every gap is in [`DEVELOPMENT.md`](DEVELOPMENT.md).
 
-**The next piece of work is specified in
-[`NEXT_SESSION_VOICE_TRANSFORM.md`](NEXT_SESSION_VOICE_TRANSFORM.md)** — cloning a voice from a
-recording and changing the timbre of a take while keeping its performance. Read that before
-starting it: it opens with a distinction that decides the whole design, and building the wrong side
-of it produces something that sounds fine alone and is useless against picture.
+**The voice transform, Path A, is built** (v3.2): a take keeps its timing and gets a cloned voice's
+timbre. [`NEXT_SESSION_VOICE_TRANSFORM.md`](NEXT_SESSION_VOICE_TRANSFORM.md) holds the brief and the
+answers to its three opening questions. **The next step is Baba's ears, not code:** one line, one
+friend's voice, listened to against picture. That decides whether Path B, real speech-to-speech
+conversion, is needed at all.
 
 ---
 
@@ -61,11 +61,17 @@ Identical to the phone, cell for cell, so a project directory copies between the
       emotions.json                           custom acting directions
       cache/catalogue-<engine>.json           the voice lists, kept a month
       cache/audio/<sha>.wav                   every generated sound
+      voice-sources/<time>_<name>             recordings a cloned voice was cut from, kept so
+                                              MANTRA_VOICE can cut it again
+      tmp-transform/                          the clone's line while a transform runs
       port.txt                                written at startup, read by the launcher
       data/projects/<id>/samples/NN/
         original.wav                          the recording. NEVER overwritten
         gen/<engine>.wav                      a generated voice, beside it
-        meta.txt                              words, voice, in/out points, loop flag
+        gen/transform-<voice>.wav             his performance in a cloned voice's timbre
+        meta.txt                              words, voice, in/out points, loop flag, and after a
+                                              transform: transform_voice, transform_usage,
+                                              transform_report
 
 ## THE SCREEN
 
@@ -249,7 +255,10 @@ The log holds no key, no account name, not even a fingerprint.
 
 ---
 
-## A THIRD ENGINE IS AVAILABLE AND NOT YET WIRED
+## THE THIRD ENGINE: MANTRA_VOICE, FOR THE TRANSFORM
+
+> This section was headed **"A THIRD ENGINE IS AVAILABLE AND NOT YET WIRED"** until 11.9.2026, when
+> the transform wired it. Corrected in place.
 
 `MANTRA_VOICE` is already installed on this Mac: a Flask server always up at **127.0.0.1:8837**,
 with Whisper behind one socket and zero-shot voice cloning behind another.
@@ -267,15 +276,42 @@ Its clone models are **text-to-speech**, not voice conversion. They take words a
 reference; they have never heard a performance. That difference is the whole subject of
 [`NEXT_SESSION_VOICE_TRANSFORM.md`](NEXT_SESSION_VOICE_TRANSFORM.md).
 
+### The transform, as it stands
+
+On the cell page, under Speechify and Hume: the cloned voices, each with its **badge** — green public,
+amber private, red **no consent recorded** — then **Transform this take** and **Add a voice…**.
+
+    /hear?words=1 on the take      his words; "d" is the END time, not a duration
+    /say, engine: clone, voice     the clone's line and its word times; any other engine is refused
+    snap edges, plan, rubberband   onto a silent track exactly as long as the take
+    gen/transform-<voice>.wav      beside original.wav, never over it
+
+The report names every word stretched past **1.3x (smear)** or under **0.75x (chirp)**, with its time.
+**English lines only**, because MANTRA_VOICE's ears are fixed to English.
+
+**Consent.** A voice cannot be added without who gave it, what for, and public or private; the note
+goes into MANTRA_VOICE's `meta.json` and needs MANTRA_VOICE from the `voice-transform` commit onward
+(`/consent`, and `add` keeping the note). **A take from a voice not cleared for release downloads
+with PRIVATE in its file name**, and the stricter of the note at transform time and the note now wins.
+
+**Needs ffmpeg**, the same one MANTRA_VOICE uses, with rubberband (Homebrew's has it); without
+rubberband it falls back to atempo and the report says which.
+
 ## WHERE FREE COMPUTE ACTUALLY EXISTS
 
 Asked and answered 31.8.2026, because it decides what the phone can reach:
 
-- **Oracle Cloud Always Free** — Ampere A1, up to 4 OCPUs and 24 GB RAM, persistent, public IP, no
-  GPU. The only one of the three that can be an endpoint the phone calls. Baba already runs
-  `MAHA_TRANSCRIBE_VM` on one.
-- **`build.nvidia.com`** — hosted models with free credits. **Parakeet** is a genuine Whisper
-  replacement for English, faster and more accurate.
+- **Oracle Cloud Always Free** — Ampere A1, **2 OCPUs and 12 GB RAM** across the whole tenancy,
+  persistent, public IP, no GPU. The only one of the three that can be an endpoint the phone calls.
+  Baba's `teacher-vm` in Frankfurt was launched at 4 and 24 on 7.9.2026, the day the account was made,
+  inside the thirty-day trial. **Oracle disables every A1 instance of a tenancy that is over the
+  allowance when the trial ends, and deletes them thirty days later.** Check `nproc` and `free -g`,
+  and resize to 2 and 12 or upgrade the account before about 7.10.2026.
+  > Said "up to 4 OCPUs and 24 GB RAM" until 11.9.2026. Oracle halved it: 1,500 OCPU hours and 9,000
+  > GB hours a month, announced for 15.6.2026 and enforced from 18.8.2026. Corrected in place.
+- **`build.nvidia.com`** — hosted models with free credits. **No voice conversion** in any of its 105
+  endpoints (walked 11.9.2026); Magpie TTS Zeroshot clones by text, like MANTRA_VOICE, and is marked
+  unavailable. **Parakeet** v3 transcribes 25 languages including Croatian, with word timestamps.
 - **Google Colab** — a T4 for twelve hours at a time, no fixed address. For benchmarks, not for
   serving.
 - **Streamlit Community Cloud** — CPU, about 1 GB, sleeps. A control panel, not a model host.
@@ -284,8 +320,8 @@ The reasoning behind each is in the brief.
 
 ## RUNNING THE CHECKS
 
-    python3 tests/test_server.py     96 cases, no network, no browser
-    python3 scripts/gates.py         49 checks, 2 honestly not run
+    python3 tests/test_server.py     132 cases, no network, no browser (one needs ffmpeg)
+    python3 scripts/gates.py         55 checks, 2 honestly not run
 
 ## WHAT HAS NEVER BEEN PROVEN
 
@@ -296,3 +332,9 @@ opening, `getUserMedia`, the recorder, the resampler, the editor's drag, the loo
 
 The likeliest first failure is the microphone: Chrome grants it to `127.0.0.1` without a
 certificate and Safari does not always.
+
+**The transform has never met the real models.** Its route was driven over HTTP against a stand-in
+for `/hear` and `/say` in their exact shapes, with a real mp3 and real rubberband; the page was walked
+in Chromium on Linux; the consent routes ran against MANTRA_VOICE's real code with real ffmpeg cuts.
+Not run: Whisper's actual word times on his voice, a real clone's line, how the stretch **sounds**,
+Homebrew's ffmpeg, and MANTRA_VOICE under its LaunchAgent after a pull.

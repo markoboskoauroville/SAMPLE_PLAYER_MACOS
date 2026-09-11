@@ -106,6 +106,81 @@ the kind of text that is full of them.
 
 ---
 
+## The voice transform, Path A — edition v3.2, 11.9.2026
+
+**His performance, their timbre, using only what is already on the Mac.** MANTRA_VOICE clones by
+text-to-speech, so what it says has the model's rhythm. The transform puts his rhythm back: his words
+from `/hear?words=1`, the same words spoken by the clone through `/say`, both sets of word edges
+snapped onto the sound, a plan that lays each of their words onto his window, and rubberband onto a
+silent track exactly as long as his take. Written into `gen/transform-<voice>.wav`, never over the
+recording.
+
+**The plan tries the cheap things first.** A word already between 0.75x and 1.3x is left alone. A
+word of his that is much longer lets its tail go silent, up to 300 ms, with the onset kept where he
+said it. A word that is much shorter borrows the pause after it, and at most 50 ms before, because
+sound arriving before a mouth opens is the lip sync error the eye catches first. Past that, the word
+is joined to the words he ran on into and stretched as a phrase. Past that, **the report says smear or
+chirp** and names the word and its time, rather than claiming it is clean.
+
+**Word edges are snapped, because Whisper's are loose.** It places a boundary from attention, not
+from the waveform, and 30-80 ms out is common, which is most of the lip sync budget. Each edge looks
+50 ms either way in 10 ms frames. Measured on a synthetic take through real rubberband: the worst edge
+in the rendered track landed 7.5 ms from where he said the word. That measures where sound lands, not
+how it sounds; how it sounds is his to judge.
+
+**Three facts read from MANTRA_VOICE's code before a line was written, each of which would have made
+the transform quietly wrong:**
+
+- `d` in `/hear`'s words is the word's **end time**, from `round(w.end, 3)` in `ears.py`. `API.md`'s
+  example reads like a duration and the brief said "start and duration".
+- `/say` takes its engine from the Mac-wide setting when none is sent. With the computer's voice set
+  to Beatrice, a request naming a clone is spoken by Speechify, billed, and reported under the
+  clone's name. So the transform sends `engine: clone` and refuses any answer that is not that engine
+  and that voice.
+- `ears.py` fixes `language='en'`. **Path A works on English lines only** until that changes.
+
+**A local engine has no key, no credit probe and no spend line.** A gate asserts it over the whole
+transform section, so the next change cannot bolt one on because the key ring is there.
+
+### Consent, and the badge
+
+A voice cannot be added without **who gave it, what for, and public or private**. The date defaults to
+today and cannot be in the future. The note lives in MANTRA_VOICE's `meta.json` beside `ref.wav`, so
+every app on the Mac that lists voices sees it, not only this one; MANTRA_VOICE checks the same rule
+(`clean_consent`) and this app checks it first (`consent_problem`) so a refusal comes before the upload.
+
+**Public or private has no default.** A default is where nobody thinks. Green is public, amber is
+private, **red is no note at all**, the one real fault on the page. A voice from before notes existed
+is red and is treated as stricter than private; choosing it offers to record the note.
+
+**The warning travels in the file name.** A take goes into a Resolve bin under the words it says, and
+nothing else about it is visible there, so a take made with a voice that is not cleared downloads as
+`Can I talk now (PRIVATE voice kristijan, not for release).wav`. The cell remembers the usage at the
+moment of the transform, the voice's current note is asked at the moment of download, and **the
+stricter word wins** — a voice withdrawn later makes its old takes private at once, and a voice made
+public later does not make an old take public by surprise.
+
+### What the tests found that reading did not
+
+- **A voice added with a note ended up with none.** The ears timed out after the reference was cut,
+  and MANTRA_VOICE wrote `meta.json` last. It now writes the note the moment the cut exists, and a
+  failed transcription is an empty `ref.txt` rather than a failed add.
+- **A word rescued exactly to 0.75x was reported as a chirp.** Floating point landed a hair under the
+  limit. A millionth of tolerance, and a test sweeping two hundred lengths both ways.
+- **`.DS_Store` counted as a generated voice.** Finder writes one the first time a cell's folder is
+  opened; the old code listed every file in `gen/`. Seen live on v3.1 in the upgrade test.
+- **Two of the new tests proved nothing.** Found by breaking the code twelve ways and watching which
+  tests went red: the 50 ms rule was never reached, because the words in that test joined into a phrase
+  first. **And the mutation harness itself lied twice** until it ran with `PYTHONDONTWRITEBYTECODE=1`:
+  stale bytecode attributed one mutation's failures to the next.
+
+### The stale-server case
+
+`sampleplayer-update` run in a second terminal replaces the page on disk while the panel's old server
+keeps running from memory. The new page asking the old server for `/api/clones` gets a 404, and says:
+*press q in the Sample Player terminal, then run sampleplayer again*. Proven by serving the v3.2 page
+from the v3.1 server in Chromium.
+
 # PART TWO — WHAT IS NOT PORTED YET
 
 Said plainly rather than discovered. The phone edition is at v20 and this is v1.

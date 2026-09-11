@@ -647,5 +647,334 @@ class Waveform(unittest.TestCase):
         self.assertEqual(len(S.waveform([100, 200], 256)), 256)
 
 
+# ─────────────────────────────────────────────────────────── voice transform ──
+
+def bursts(rate, total, spans, amp=8000, freq=180.0, noise=40):
+    """Speech-shaped enough for edges: a voiced tone inside each span, faint noise everywhere else.
+    Deterministic noise, so a failure reproduces."""
+    import math
+    out = []
+    seed = 12345
+    for k in range(int(total * rate)):
+        seed = (1103515245 * seed + 12345) & 0x7FFFFFFF
+        v = (seed % (2 * noise + 1)) - noise
+        t = k / rate
+        if any(a <= t < b for a, b in spans):
+            v += int(amp * math.sin(2 * math.pi * freq * t))
+        out.append(max(-32768, min(32767, v)))
+    return out
+
+
+class Plan(unittest.TestCase):
+    """The plan that lays their words onto his. Its invariants are what lip sync rests on."""
+
+    def check_invariants(self, segs, n, total):
+        seen = [w for s in segs for w in s["words"]]
+        self.assertEqual(seen, list(range(n)), "every word once, in order")
+        end = 0.0
+        for s in segs:
+            t0, t1 = s["dst"]
+            self.assertGreaterEqual(t0, end - 1e-9, "segments never overlap")
+            self.assertGreater(t1, t0)
+            self.assertLessEqual(t1, total + 1e-9)
+            end = t1
+
+    def test_clean_ratios_are_left_exactly_where_he_said_them(self):
+        his = [(0.10, 0.40), (0.60, 0.90), (1.20, 1.50)]
+        theirs = [(0.05, 0.33), (0.40, 0.70), (0.90, 1.18)]
+        segs = S.plan_stretch(his, theirs, 2.0, 1.5)
+        self.assertEqual([s["dst"] for s in segs], his)
+        self.assertEqual({s["level"] for s in segs}, {"word"})
+        self.assertEqual({s["verdict"] for s in segs}, {"ok"})
+
+    def test_a_long_word_of_his_lets_its_tail_go_silent_rather_than_smear(self):
+        # his word 0.60 s, theirs 0.30 s: 2.0x. A pause follows. The onset stays; the tail absorbs.
+        segs = S.plan_stretch([(0.20, 0.80)], [(0.10, 0.40)], 2.0, 1.0)
+        self.assertEqual(segs[0]["dst"][0], 0.20, "the onset is his")
+        self.assertAlmostEqual(segs[0]["ratio"], 1.30, places=2)
+        self.assertEqual(segs[0]["verdict"], "ok")
+
+    def test_a_word_rescued_exactly_to_a_limit_is_called_ok(self):
+        # Measured 11.9.2026 through the route: "I" was borrowed up to exactly 0.75 and reported as a
+        # chirp, because floating point landed a hair under the limit. Swept, so no lucky pair hides it.
+        wrong = []
+        for k in range(200):
+            src = 0.20 + k * 0.0017
+            for his in (src * 0.5, src * 2.4):               # one that borrows, one that absorbs
+                seg = S.plan_stretch([(0.8, 0.8 + his)], [(0.0, src)], 5.0, 5.0)[0]
+                need = src * S.CHIRP - his if his < src else his - src * S.SMEAR
+                rescuable = need <= S.ABSORB
+                if (seg["verdict"] == "ok") != rescuable:    # rescued is ok; beyond 300 ms it must say so
+                    wrong.append((round(src, 4), round(his, 4), seg["ratio"], seg["verdict"]))
+        self.assertEqual(wrong, [], "%d boundary cases misreported, first %s" % (len(wrong), wrong[:2]))
+
+    def test_absorbing_stops_at_300_ms_and_then_says_smear(self):
+        # 1.00 s against 0.25 s is 4x: 300 ms cannot fix it, and the verdict must not claim ok
+        segs = S.plan_stretch([(0.0, 1.0)], [(0.0, 0.25)], 2.0, 1.0)
+        self.assertAlmostEqual(segs[0]["dst"][1], 0.70, places=3)
+        self.assertEqual(segs[0]["verdict"], "smear")
+
+    def test_a_short_word_borrows_the_pause_after_it(self):
+        segs = S.plan_stretch([(0.20, 0.35), (0.80, 1.10)], [(0.10, 0.40), (0.50, 0.80)], 2.0, 1.0)
+        self.assertEqual(segs[0]["dst"][0], 0.20, "borrowed from after, so the onset did not move")
+        self.assertAlmostEqual(segs[0]["ratio"], 0.75, places=2)
+        self.assertEqual(segs[0]["verdict"], "ok")
+
+    def test_a_short_word_with_little_pause_after_starts_at_most_50_ms_early(self):
+        # The next word is exactly JOIN_GAP away, so the two cannot become a phrase, and the 80 ms
+        # after is all the room there is behind. The rest has to come from before, and at most 50 ms
+        # of it. (The first version of this test put the next word flush against it; the two then
+        # joined into a phrase and the 50 ms rule was never reached, so the test passed with the
+        # rule deleted. Found by deleting the rule, 11.9.2026.)
+        his = [(0.50, 0.60), (0.68, 0.98)]
+        theirs = [(0.00, 0.60), (0.60, 0.90)]
+        segs = S.plan_stretch(his, theirs, 2.0, 1.0)
+        self.assertEqual(segs[0]["words"], [0], "no phrase: the rule under test is reached")
+        self.assertAlmostEqual(segs[0]["dst"][0], 0.45, places=6)
+        self.assertAlmostEqual(segs[0]["dst"][1], 0.68, places=6)
+        self.check_invariants(segs, 2, 2.0)
+
+    def test_a_word_he_ran_into_its_neighbour_is_stretched_as_a_phrase(self):
+        # word 0 is 3x, word 1 is 0.5x, with no gap: alone both fail, together 1.0x
+        his = [(0.00, 0.30), (0.30, 0.40)]
+        theirs = [(0.00, 0.10), (0.10, 0.30)]
+        segs = S.plan_stretch(his, theirs, 0.40, 0.30)
+        self.assertEqual(len(segs), 1)
+        self.assertEqual(segs[0]["level"], "phrase")
+        self.assertEqual(segs[0]["words"], [0, 1])
+        self.assertEqual(segs[0]["verdict"], "ok")
+
+    def test_a_clean_word_lends_room_to_an_extreme_word_after_it(self):
+        his = [(0.00, 0.40), (0.40, 0.45)]          # the second word he clipped very short
+        theirs = [(0.00, 0.30), (0.30, 0.45)]
+        segs = S.plan_stretch(his, theirs, 0.45, 0.45)
+        self.assertEqual(segs[0]["words"], [0, 1])
+        self.assertEqual(segs[0]["verdict"], "ok")
+
+    def test_words_separated_by_a_breath_are_never_joined(self):
+        his = [(0.00, 0.30), (0.60, 0.70)]          # a 300 ms pause between them
+        theirs = [(0.00, 0.10), (0.10, 0.30)]
+        segs = S.plan_stretch(his, theirs, 1.0, 0.30)
+        self.assertEqual(len(segs), 2)
+        self.assertEqual({s["level"] for s in segs}, {"word"})
+
+    def test_joining_that_would_not_help_is_refused(self):
+        # both words are 3x and run together: joining leaves it 3x, so they stay two words
+        segs = S.plan_stretch([(0.0, 0.3), (0.3, 0.6)], [(0.0, 0.1), (0.1, 0.2)], 1.0, 0.2)
+        self.assertEqual(len(segs), 2)
+
+    def test_whisper_nonsense_is_cleaned_rather_than_believed(self):
+        his = [(0.5, 0.4), (0.3, 0.9), (0.8, 5.0)]    # backwards, overlapping, past the end
+        theirs = [(0.0, 0.0), (0.2, 0.1), (0.3, 0.6)]
+        segs = S.plan_stretch(his, theirs, 1.0, 0.6)
+        self.check_invariants(segs, 3, 1.0)
+        self.assertTrue(all(s["ratio"] > 0 for s in segs))
+
+    def test_nothing_in_gives_nothing_out(self):
+        self.assertEqual(S.plan_stretch([], [], 1.0, 1.0), [])
+        self.assertEqual(S.plan_stretch([(0, 1)], [], 1.0, 1.0), [])
+
+    def test_a_long_line_keeps_every_invariant(self):
+        import random
+        rnd = random.Random(7)
+        his, theirs, a, b = [], [], 0.0, 0.0
+        for _ in range(60):
+            a += rnd.uniform(0.0, 0.25); d = rnd.uniform(0.08, 0.6); his.append((a, a + d)); a += d
+            b += rnd.uniform(0.0, 0.15); e = rnd.uniform(0.08, 0.6); theirs.append((b, b + e)); b += e
+        segs = S.plan_stretch(his, theirs, a + 0.5, b + 0.5)
+        self.check_invariants(segs, 60, a + 0.5)
+
+
+class Snap(unittest.TestCase):
+    RATE = 16000
+
+    def test_loose_whisper_edges_move_onto_the_sound(self):
+        true = [(0.30, 0.62), (0.90, 1.25)]
+        sig = bursts(self.RATE, 1.6, true)
+        loose = [(0.34, 0.58), (0.86, 1.29)]         # 40 ms out each way, as Whisper is
+        got = S.snap_spans(sig, self.RATE, loose)
+        for (a, b), (c, d) in zip(got, true):
+            self.assertLessEqual(abs(a - c), 0.011, "start within one frame")
+            self.assertLessEqual(abs(b - d), 0.011, "end within one frame")
+
+    def test_an_edge_with_nothing_loud_near_it_stays_put(self):
+        sig = bursts(self.RATE, 2.0, [(0.30, 0.60)])
+        got = S.snap_spans(sig, self.RATE, [(0.30, 0.60), (1.40, 1.60)])
+        self.assertEqual(got[1], (1.40, 1.60))
+
+    def test_it_never_returns_a_span_that_ends_before_it_starts(self):
+        sig = bursts(self.RATE, 1.0, [(0.1, 0.9)])  # one long sound, words run straight through
+        got = S.snap_spans(sig, self.RATE, [(0.1, 0.3), (0.3, 0.6), (0.6, 0.9)])
+        for a, b in got:
+            self.assertGreater(b, a)
+
+    def test_silence_or_nothing_does_not_crash(self):
+        self.assertEqual(S.snap_spans([], self.RATE, [(0, 1)]), [(0, 1)])
+        self.assertEqual(len(S.snap_spans([0] * 16000, self.RATE, [(0.2, 0.5)])), 1)
+
+
+class Consent(unittest.TestCase):
+    TODAY = "2026-09-11"
+    GOOD = {"who": "Manan Periwal", "when": "2026-09-10", "what_for": "the brain brake film", "usage": "public"}
+
+    def test_a_complete_note_passes(self):
+        self.assertIsNone(S.consent_problem(self.GOOD, self.TODAY))
+
+    def test_each_missing_part_is_named(self):
+        for field, words in (("who", "who"), ("what_for", "what"), ("usage", "public or private")):
+            c = dict(self.GOOD); c[field] = "  " if field != "usage" else ""
+            self.assertIn(words, S.consent_problem(c, self.TODAY))
+
+    def test_usage_is_one_of_two_words_and_nothing_else(self):
+        for bad in ("Public", "maybe", "film only", None):
+            c = dict(self.GOOD); c["usage"] = bad
+            self.assertIsNotNone(S.consent_problem(c, self.TODAY))
+
+    def test_permission_cannot_be_dated_tomorrow(self):
+        c = dict(self.GOOD); c["when"] = "2026-09-12"
+        self.assertIn("future", S.consent_problem(c, self.TODAY))
+
+    def test_an_empty_date_means_today_and_is_written_as_today(self):
+        c = dict(self.GOOD); c["when"] = ""
+        self.assertIsNone(S.consent_problem(c, self.TODAY))
+        self.assertEqual(S.consent_record(c, self.TODAY)["when"], self.TODAY)
+
+    def test_the_record_keeps_four_fields_and_drops_the_rest(self):
+        c = dict(self.GOOD, extra="x", who="  Manan   Periwal ")
+        rec = S.consent_record(c, self.TODAY)
+        self.assertEqual(set(rec), {"who", "when", "what_for", "usage"})
+        self.assertEqual(rec["who"], "Manan Periwal")
+
+
+class Badge(unittest.TestCase):
+    def test_a_voice_from_before_consent_notes_is_not_releasable(self):
+        b = S.voice_badge({"name": "voice1", "source": "/x.wav"})
+        self.assertEqual((b["usage"], b["release"]), ("none", False))
+
+    def test_public_and_private(self):
+        c = dict(Consent.GOOD)
+        self.assertEqual(S.voice_badge({"consent": c})["usage"], "public")
+        c["usage"] = "private"
+        b = S.voice_badge({"consent": c})
+        self.assertEqual((b["usage"], b["release"]), ("private", False))
+
+    def test_a_half_written_note_is_no_note(self):
+        self.assertEqual(S.voice_badge({"consent": {"usage": "public"}})["usage"], "none")
+
+    def test_the_stricter_word_always_wins(self):
+        self.assertEqual(S.stricter("public", "private"), "private")
+        self.assertEqual(S.stricter("private", "public"), "private")
+        self.assertEqual(S.stricter("public", "none"), "none")
+        self.assertEqual(S.stricter("public", None), "public", "unreachable: the snapshot stands")
+        self.assertEqual(S.stricter("garbage", "public"), "none")
+
+
+class NoteKept(unittest.TestCase):
+    """
+    MANTRA_VOICE older than 11.9.2026 accepts /add with a consent field, answers 200 and ok, and drops
+    the note — measured against its master branch. So the add is judged by what came back.
+    """
+    REC = {"who": "Manan Periwal", "when": "2026-09-10", "what_for": "the film", "usage": "public"}
+
+    def test_the_note_that_came_back_is_the_note_that_was_sent(self):
+        self.assertTrue(S.note_kept({"voices": [{"name": "manan", "consent": dict(self.REC)}]}, "manan", self.REC))
+
+    def test_an_old_mantra_voice_that_dropped_the_note_is_caught(self):
+        self.assertFalse(S.note_kept({"ok": True, "voices": [{"name": "manan", "source": "/x"}]}, "manan", self.REC))
+
+    def test_a_different_note_or_a_missing_voice_is_not_kept(self):
+        other = dict(self.REC, usage="private")
+        self.assertFalse(S.note_kept({"voices": [{"name": "manan", "consent": other}]}, "manan", self.REC))
+        self.assertFalse(S.note_kept({"voices": []}, "manan", self.REC))
+        self.assertFalse(S.note_kept({"ok": True}, "manan", self.REC))
+
+
+class ReleaseName(unittest.TestCase):
+    """The warning that reaches the Resolve bin, because the file name is all that is seen there."""
+
+    def setUp(self):
+        self.saved = S.voice_api
+
+    def tearDown(self):
+        S.voice_api = self.saved
+
+    def meta(self, usage):
+        return {"voice": "transform-mira", "transform_voice": "mira", "transform_usage": usage}
+
+    def test_a_private_take_says_so_in_its_name(self):
+        S.voice_api = lambda *a, **k: (None, "not running")
+        self.assertIn("PRIVATE", S.release_suffix(self.meta("private"), "/x/gen/transform-mira.wav"))
+
+    def test_a_public_take_made_private_later_is_named_private(self):
+        c = dict(Consent.GOOD, usage="private")
+        S.voice_api = lambda *a, **k: ({"voices": [{"name": "mira", "consent": c}]}, "")
+        self.assertIn("PRIVATE", S.release_suffix(self.meta("public"), "/x/gen/transform-mira.wav"))
+
+    def test_a_public_take_stays_public(self):
+        S.voice_api = lambda *a, **k: ({"voices": [{"name": "mira", "consent": Consent.GOOD}]}, "")
+        self.assertNotIn("PRIVATE", S.release_suffix(self.meta("public"), "/x/gen/transform-mira.wav"))
+
+    def test_an_engine_take_or_his_own_recording_gets_no_suffix(self):
+        S.voice_api = lambda *a, **k: self.fail("no lookup is needed for these")
+        self.assertEqual(S.release_suffix({"voice": "speechify"}, "/x/gen/speechify.wav"), "")
+        self.assertEqual(S.release_suffix(self.meta("private"), "/x/original.wav"), "")
+
+
+class GeneratedList(unittest.TestCase):
+    def test_finder_and_half_written_files_are_not_voices(self):
+        d = tempfile.mkdtemp()
+        for name in (".DS_Store", "hume.wav", "speechify.wav.tmp", "transform-mira.wav", "._hume.wav"):
+            open(os.path.join(d, name), "wb").close()
+        self.assertEqual(S.generated_voices(d), ["hume", "transform-mira"])
+        self.assertEqual(S.generated_voices(os.path.join(d, "absent")), [])
+        shutil.rmtree(d)
+
+
+class Stretch(unittest.TestCase):
+    def test_atempo_below_its_floor_is_chained(self):
+        f = S.stretch_filter(0.3, False)
+        self.assertTrue(f.startswith("atempo=0.5,"))
+        product = 1.0
+        for part in f.split(","):
+            product *= float(part.split("=")[1])
+        self.assertAlmostEqual(product, 0.3, places=5)
+
+    def test_rubberband_is_asked_for_by_tempo(self):
+        self.assertIn("tempo=1.250000", S.stretch_filter(1.25, True))
+
+    def test_the_engine_name_cannot_become_a_path(self):
+        self.assertEqual(S.engine_for("../../original"), "transform-______original")
+        S.generated("p", 0, S.engine_for("../x"))   # does not raise
+
+
+@unittest.skipUnless(shutil.which("ffmpeg"), "ffmpeg is not installed here")
+class RenderAgainstTheClock(unittest.TestCase):
+    """
+    NOT A MOCK OF THE MODEL, A MEASUREMENT OF THE RENDERER. Their "words" are tone bursts at known
+    times, his windows are other known times, and the rendered track is read back and every onset
+    and offset found in it is compared with where he said the word. This is the lip sync claim at
+    the level of the mechanism: given correct word times, where does the sound land.
+    """
+
+    def test_every_word_lands_on_his_timing(self):
+        rate = 44100
+        d = tempfile.mkdtemp()
+        theirs_spans = [(0.10, 0.38), (0.55, 0.90), (1.05, 1.25), (1.40, 1.80)]
+        his_spans = [(0.30, 0.62), (0.80, 1.05), (1.60, 1.84), (2.10, 2.60)]
+        their_wav = os.path.join(d, "theirs.wav")
+        S.write_wav(their_wav, bursts(rate, 2.0, theirs_spans), rate)
+        segs = S.plan_stretch(his_spans, theirs_spans, 3.0, 2.0)
+        track, filt, why = S.render_plan(shutil.which("ffmpeg"), their_wav, 2.0, segs, 3 * rate, rate)
+        self.assertEqual(why, "")
+        self.assertEqual(len(track), 3 * rate, "exactly as long as his take")
+        found = S.snap_spans(track, rate, [s["dst"] for s in segs])
+        worst = 0.0
+        for s, (a, b) in zip(segs, found):
+            worst = max(worst, abs(a - s["dst"][0]), abs(b - s["dst"][1]))
+        print("\n      renderer %s: worst edge error %.1f ms over %d segments" % (filt, worst * 1000, len(segs)))
+        self.assertLessEqual(worst, 0.015)
+        shutil.rmtree(d)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

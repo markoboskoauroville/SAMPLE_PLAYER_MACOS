@@ -5,6 +5,11 @@
 Written 31.8.2026 at the end of a long session, so that the next one starts from what is known
 rather than rediscovering it. Everything below marked *measured* was run against live systems.
 
+> **Status, 11.9.2026: Path A is built** (edition v3.2) and the three opening questions in §8 are
+> answered there. Three facts in this brief were wrong and are corrected where they stand, with the
+> old wording quoted: the meaning of `d` (§3, §4), the Oracle allowance (§5), and what NVIDIA offers
+> (§5). The decisions and measurements are in [`DEVELOPMENT.md`](DEVELOPMENT.md).
+
 ---
 
 # 1. WHAT BABA ASKED FOR, IN HIS WORDS
@@ -41,6 +46,9 @@ Private repo **`MANTRA_VOICE`**. Read its `README.md` and `API.md` before writin
     timing.py    aligns heard words to written words — HALF THE JOB IS ALREADY HERE
 
     POST /hear?words=1   → {"words": [{"w": "Can", "t": 0.12, "d": 0.3}, …]}
+                           t is the START and d is the END, both in seconds. d is NOT a duration:
+                           ears.py writes round(w.end, 3) into it. (Read from the code 11.9.2026;
+                           the example above reads like a duration and nearly built the stretch wrong.)
     POST /say            → mp3 + tokens + sents
     GET  /health         → {"engine": "clone", "voice": "voice1", "model": "qwen06"}
 
@@ -61,13 +69,20 @@ is nothing to train and nothing to store but the wav. Adding a voice is one ffmp
 
 ## PATH A — performance-locked cloning, using only what is installed
 
-1. `POST /hear?words=1` on Baba's take → **his** words, each with `t` and `d`
-2. `POST /say` in the friend's cloned voice → the line, wrong rhythm
-3. `POST /hear?words=1` on the clone → **their** words with times
-4. Stretch each of their words onto his word's start and duration
+1. `POST /hear?words=1` on Baba's take → **his** words, each with a start `t` and an end `d`
+2. `POST /say` in the friend's cloned voice, **with `engine: clone`** → the line, wrong rhythm, and
+   **their** word times already measured: `/say` runs the ears on the clip and returns `tokens`
+3. Both sets of word edges snapped onto the sound, because Whisper's are tens of milliseconds loose
+4. Stretch each of their words onto his word's start and end
 
-His rhythm, his pauses, his emphasis placement, their timbre. `timing.py` already does step 4's
-alignment.
+His rhythm, his pauses, his emphasis placement, their timbre.
+
+> Until 11.9.2026 step 1 said "each with `t` and `d`", step 3 was a second `/hear` on the clone, step 4
+> said "start and duration", and this line said "`timing.py` already does step 4's alignment". Three
+> corrections: `d` is the end; `/say` already returns the clone's word times, so the second `/hear` is
+> not needed; and `timing.py` aligns heard words to the **written text**, not to another take's
+> times — the stretch plan is new code (`plan_stretch` in `server.py`). And `/say` must be sent
+> `engine: clone`, or on a Mac set to Beatrice it speaks with Speechify under the clone's name.
 
 **The honest limit, and it must be told to him plainly:** where his word is much longer than
 theirs, the stretch smears. Past roughly **1.3×** it is audible, and below **0.75×** it chirps.
@@ -103,13 +118,18 @@ different things and only one of them is a serving platform.
 
 ## Oracle Cloud Always Free — **YES, and it is the real answer**
 
-    Ampere A1 (ARM):  up to 4 OCPUs and 24 GB RAM, always free, no expiry
+    Ampere A1 (ARM):  2 OCPUs and 12 GB RAM across the tenancy, always free, no expiry
     2 AMD micro VMs:  1/8 OCPU, 1 GB each — too small for this
     Public IP, persistent, root, 10 TB egress a month
     NO GPU on the free tier
 
-**24 GB of RAM is a lot**, and ARM CPU inference for small TTS/VC models is slow but real. He is
-already running one: `MAHA_TRANSCRIBE_VM` is described as "an always-free ARM VM".
+> Until 11.9.2026 this said "up to 4 OCPUs and 24 GB RAM" and "**24 GB of RAM is a lot**". Oracle
+> halved the allowance to 1,500 OCPU hours and 9,000 GB hours a month (2 OCPUs, 12 GB), from 15.6.2026,
+> enforced from 18.8.2026. `MAHA_TRANSCRIBE_VM/MIGRATION_PROMPT.md` already knew on 3.9.2026.
+
+**12 GB and two ARM cores** is enough for Whisper and Piper and not for a cloned voice, which the
+teacher's record measured at minutes a sentence on four cores. He is already running one:
+`teacher-vm`, the machine behind `ttt-lll.pages.dev`.
 
 This is the only one of the three that can be **an API endpoint his phone calls**. That matters:
 the Android app cannot reach `127.0.0.1:8837` on the Mac, so anything the phone needs must live
@@ -118,6 +138,13 @@ somewhere with an address.
 **What to check first:** `nproc`, `free -g`, and whether his tenancy is in a region where A1
 capacity is actually available — Oracle frequently answers "out of host capacity" for A1, which is
 the single most likely blocker and has nothing to do with his account.
+
+> **Answered 11.9.2026, and capacity was not the blocker.** Frankfurt gave `teacher-vm` its A1 on
+> 7.9.2026. The blocker is the allowance: that machine was launched at 4 OCPUs and 24 GB on the day the
+> account was made, inside the free trial, and Oracle's own Free Tier page says an Always Free tenancy
+> over the allowance has **all** its A1 instances disabled when the trial ends and deleted thirty days
+> after. `nproc` and `free -g` could not be run from the session (no key for the machine); they are
+> his to run, before about 7.10.2026.
 
 ## Google Colab free — **for experiments, not for serving**
 
@@ -151,6 +178,15 @@ the thing to verify; NeMo is CUDA-first and ARM is not its happy path.
 
 **What to measure and report back:** free credit size, rate limits, whether a voice reference can be
 supplied at all, and latency for one sentence.
+
+> **Answered 11.9.2026 from NVIDIA's public catalogue, all 105 endpoints walked: there is no voice
+> conversion.** Magpie TTS Zeroshot takes a reference recording and **text** — the same side of the
+> line as MANTRA_VOICE — needs access approval, and the catalogue marks it unavailable. The page's
+> "Speech-to-speech" label is on Background Noise Removal and Studio Voice, which are enhancement.
+> Speech models are served over Riva's gRPC and do not appear in `/v1/models` at all. **Parakeet
+> tdt-0.6b-v3 transcribes 25 languages including Croatian, with word timestamps.** Not measured,
+> because the session had no NVIDIA key: credit size, rate limits, latency.
+> See `MANTRA_MANIFEST/apis/nvidia.md`.
 
 ## The ranking, for serving
 
@@ -191,7 +227,20 @@ that causes trouble in two years when nobody remembers. Make the field required 
 Before writing app code, answer these — they change what gets built:
 
 1. **Does his Oracle tenancy actually have A1 capacity?** `nproc`, `free -g`, region.
+
+   *11.9.2026:* it had capacity in Frankfurt; what it lacks is allowance. Resize `teacher-vm` to 2 and
+   12, or upgrade the account, before about 7.10.2026. No second free machine exists to be had, and a
+   cloned voice will not run usefully on two ARM cores.
+
 2. **Does `build.nvidia.com` expose voice conversion, or only TTS?** If conversion, Path B is an
    API call rather than an install.
+
+   *11.9.2026:* only TTS. **Path B is an install.** Parakeet is worth having for the ears.
+
 3. **On his own voice, how bad is the smearing in Path A?** One line, one friend's reference, his
    own ears. That answer decides whether Path B is needed at all.
+
+   *Open.* It cannot be answered anywhere but his Mac. Path A is built so that it can: record a line
+   in a cell, choose the voice, press Transform this take, listen, and read which words the report
+   names. The mechanism was measured at 7.5 ms worst edge on a synthetic take; the sound is his to
+   judge.
