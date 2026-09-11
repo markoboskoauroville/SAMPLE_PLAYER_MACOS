@@ -328,7 +328,8 @@ Everything on the machine is installed from the internet, never copied from the 
 Baba, 11.9.2026: "Prepare everything that needs SSH as a short list, so when I'm on my phone hotspot
 or at home, it runs straight away." Only text goes through the hotspot; downloads happen on the machine.
 
-    1  nc -vz -w 6 130.61.181.83 22                          must say succeeded; if not, stop
+    1  nc -vz -G 6 -w 6 130.61.181.83 22                     must say succeeded; if not, stop (-G bounds
+                                                             the connect on macOS; -w alone waits 75 s)
     2  bash ~/Developer/ABLETON_TEACHER/oracle/hotspot.sh     4.1 in one go: opens Baba's live view,
                                                              measures the machine (nproc, memory, swap,
                                                              disk, uptime, services active AND enabled,
@@ -498,3 +499,6 @@ Each session adds a line: date, what was ticked, commits, what is blocking.
                the hotspot list written under Part 4 and oracle/hotspot.sh made in ABLETON_TEACHER.
                4.6 retied to one week after the day he upgrades. Pushing the brief, the log and the
                records no longer needs asking; the four app files still do (CLAUDE.md).
+    11.9.2026  Question 4 repeated the voices' notes: verified word for word, 8 of 8, nothing
+               rewritten. hotspot.sh: bash -n clean, run on the corporate network, stops at step 1
+               in 6 s with exit 1 ("port 22 is blocked on this network"), pushed (ABLETON_TEACHER).
