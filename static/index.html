@@ -849,8 +849,15 @@ async function loadClones(i){
   const box = $("#clones");
   if (!box) return;
   let d;
-  try { d = await (await api("/api/clones")).json(); }
-  catch (e) { d = {ok: false, why: "the server did not answer"}; }
+  try {
+    const r = await api("/api/clones");
+    // A PAGE NEWER THAN ITS SERVER. sampleplayer-update run in a second terminal replaces this page
+    // on disk while the panel's old server keeps running from memory, and that server has no such
+    // route. Said as what to do, not as a failure.
+    d = r.status === 404
+      ? {ok: false, why: "the server is older than this page: press q in the Sample Player terminal, then run sampleplayer again"}
+      : await r.json();
+  } catch (e) { d = {ok: false, why: "the server did not answer"}; }
   if (!$("#clones")) return;                 // the page moved on while MANTRA_VOICE was asked
   S.clones = d.ok ? d.voices : [];
   if (!d.ok){

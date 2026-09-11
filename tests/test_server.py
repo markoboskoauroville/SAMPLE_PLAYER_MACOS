@@ -869,6 +869,26 @@ class Badge(unittest.TestCase):
         self.assertEqual(S.stricter("garbage", "public"), "none")
 
 
+class NoteKept(unittest.TestCase):
+    """
+    MANTRA_VOICE older than 11.9.2026 accepts /add with a consent field, answers 200 and ok, and drops
+    the note — measured against its master branch. So the add is judged by what came back.
+    """
+    REC = {"who": "Manan Periwal", "when": "2026-09-10", "what_for": "the film", "usage": "public"}
+
+    def test_the_note_that_came_back_is_the_note_that_was_sent(self):
+        self.assertTrue(S.note_kept({"voices": [{"name": "manan", "consent": dict(self.REC)}]}, "manan", self.REC))
+
+    def test_an_old_mantra_voice_that_dropped_the_note_is_caught(self):
+        self.assertFalse(S.note_kept({"ok": True, "voices": [{"name": "manan", "source": "/x"}]}, "manan", self.REC))
+
+    def test_a_different_note_or_a_missing_voice_is_not_kept(self):
+        other = dict(self.REC, usage="private")
+        self.assertFalse(S.note_kept({"voices": [{"name": "manan", "consent": other}]}, "manan", self.REC))
+        self.assertFalse(S.note_kept({"voices": []}, "manan", self.REC))
+        self.assertFalse(S.note_kept({"ok": True}, "manan", self.REC))
+
+
 class ReleaseName(unittest.TestCase):
     """The warning that reaches the Resolve bin, because the file name is all that is seen there."""
 

@@ -65,7 +65,7 @@ MAX_TEXT = 2000
 # THE VERSION THIS FILE IS. Bumped by hand in the same edit that bumps the installer, and checked
 # against it by G1 — two numbers that must agree is a lie waiting to happen, so the gate compares
 # them rather than trusting anybody to remember.
-EDITION = "v3.1"
+EDITION = "v3.2"
 
 RAW = "https://raw.githubusercontent.com/markoboskoauroville/SAMPLE_PLAYER_MACOS/main"
 
@@ -1559,6 +1559,12 @@ def voice_api(method, path, body=None, ctype="application/json", timeout=90):
     try:
         j = json.loads(raw.decode("utf-8", "replace"))
     except ValueError:
+        # A 404 PAGE IS AN OLDER MANTRA_VOICE. Flask answers a route it does not have with HTML, and
+        # /consent did not exist before 11.9.2026. Said as what to do.
+        if code == 404:
+            return None, ("MANTRA_VOICE is older than this app and does not have %s. Update it: "
+                          "cd ~/Developer/MANTRA_VOICE && git pull, then switch Voices off and on in the star menu"
+                          % path.split("?")[0])
         return None, "MANTRA_VOICE answered HTTP %d with something that is not JSON" % code
     if code != 200 or (isinstance(j, dict) and j.get("error")):
         said = (j.get("error") if isinstance(j, dict) else "") or "HTTP %d" % code
@@ -1644,6 +1650,18 @@ def release_suffix(meta, playing):
     return " (PRIVATE voice %s, not for release)" % meta.get("transform_voice", "")
 
 
+def note_kept(answer, name, record):
+    """
+    CHECK THE NOTE THAT CAME BACK, NOT THE 200. MANTRA_VOICE from before 11.9.2026 accepts a consent
+    field on /add, answers ok, and throws the note away — measured against its master branch. An add
+    that reported success there would leave a friend's voice with nobody's permission written down.
+    """
+    for v in (answer or {}).get("voices") or []:
+        if v.get("name") == name:
+            return (v.get("consent") or {}) == record
+    return False
+
+
 def engine_for(voice):
     return "transform-" + re.sub(r"[^A-Za-z0-9_-]", "_", voice)[:40]
 
@@ -1686,12 +1704,19 @@ def clone_add():
     safe = re.sub(r"[^A-Za-z0-9._-]", "_", f.filename)[-80:]
     src = os.path.join(src_dir, "%d_%s" % (int(time.time()), safe))
     f.save(src)
+    record = consent_record(consent, today)
     body = json.dumps({"name": name, "source": src, "start": form.get("start") or 0,
-                       "length": form.get("length") or 12, "consent": consent_record(consent, today)})
+                       "length": form.get("length") or 12, "consent": record})
     j, why = voice_api("POST", "/add", body.encode(), timeout=320)
     if j is None:
         return jsonify({"ok": False, "why": why})
-    return jsonify({"ok": True, "name": j.get("name", name)})
+    added = j.get("name", name)
+    if not note_kept(j, added, record):
+        return jsonify({"ok": False, "name": added, "why": (
+            "MANTRA_VOICE added %s but did not keep the note, so it shows as no consent recorded. "
+            "Update it: cd ~/Developer/MANTRA_VOICE && git pull, switch Voices off and on in the star menu, "
+            "then choose %s and record the note" % (added, added))})
+    return jsonify({"ok": True, "name": added})
 
 
 @app.route("/api/clones/consent", methods=["POST"])
