@@ -46,7 +46,7 @@ MAX_TEXT = 2000
 # THE VERSION THIS FILE IS. Bumped by hand in the same edit that bumps the installer, and checked
 # against it by G1 — two numbers that must agree is a lie waiting to happen, so the gate compares
 # them rather than trusting anybody to remember.
-EDITION = "v3.2"
+EDITION = "v3.3"
 
 RAW = "https://raw.githubusercontent.com/markoboskoauroville/SAMPLE_PLAYER_MACOS/main"
 
@@ -1700,6 +1700,17 @@ def clone_consent():
     return jsonify({"ok": j is not None, "why": why})
 
 
+def sweep_transform_tmp(appdir):
+    """The folders a transform works in, left by a crash or by v3.2 (which never removed its one fixed
+    folder). Swept at start, never during a run: a live transform's folder is younger than the server."""
+    gone = 0
+    for x in os.listdir(appdir) if os.path.isdir(appdir) else []:
+        if x.startswith("tmp-transform"):
+            shutil.rmtree(os.path.join(appdir, x), ignore_errors=True)
+            gone += 1
+    return gone
+
+
 def transform_cell(pid, slot, voice):
     """(report, why). Everything that can fail says which of its five steps it failed at."""
     wav = original(pid, slot)
@@ -2419,6 +2430,7 @@ def _pick_port(host, start, span=40):
 
 if __name__ == "__main__":
     os.makedirs(DATA, exist_ok=True)
+    sweep_transform_tmp(APPDIR)
     port = _pick_port(HOST, BASE_PORT)
     with open(PORT_FILE, "w") as f:
         f.write(str(port))

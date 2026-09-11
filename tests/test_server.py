@@ -1080,6 +1080,14 @@ class TwoAtOnce(unittest.TestCase):
         self.assertLess(peak["quiet"], 6000, "the quiet cell was given the loud clone's clip")
         self.assertGreater(peak["loud"], 6000, "the loud cell was given the quiet clone's clip")
 
+    def test_stale_transform_folders_are_swept_at_start(self):
+        for name in ("tmp-transform", "tmp-transform-abc123"):
+            os.makedirs(os.path.join(S.APPDIR, name), exist_ok=True)
+        os.makedirs(os.path.join(S.APPDIR, "data"), exist_ok=True)
+        self.assertEqual(S.sweep_transform_tmp(S.APPDIR), 2, "v3.2's fixed folder and a crashed run's folder")
+        self.assertEqual([x for x in os.listdir(S.APPDIR) if x.startswith("tmp-transform")], [])
+        self.assertTrue(os.path.isdir(os.path.join(S.APPDIR, "data")), "nothing else is touched")
+
     def test_nothing_temporary_is_left_behind(self):
         left = [x for x in os.listdir(S.APPDIR) if x.startswith("tmp-transform")]
         self.assertEqual(left, [], "a transform's temporary folder must be removed when it ends")

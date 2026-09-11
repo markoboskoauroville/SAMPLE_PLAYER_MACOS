@@ -1,6 +1,6 @@
 #!/bin/bash
 # ---------------------------------------------------------------------------
-# SAMPLE PLAYER — installer for macOS                        edition: v3.2
+# SAMPLE PLAYER — installer for macOS                        edition: v3.3
 #
 # repo: SAMPLE_PLAYER_MACOS
 #
@@ -196,6 +196,7 @@ if [ ! -f "$APPDIR/keys.txt" ]; then
 # AssemblyAI transcribes and is required. Speechify and Hume are the two voice
 # engines and either one is enough.
 KEYEOF
+  chmod 600 "$APPDIR/keys.txt"                 # it will hold credentials; 644 was measured 11.9.2026
   good "key file created at $APPDIR/keys.txt"
 else
   row "keys" "already there, left alone" "$DIM"
