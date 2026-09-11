@@ -397,3 +397,34 @@ Each session adds a line: date, what was ticked, commits, what is blocking.
                     needs a push to main, so the box waits for Baba's yes on 3.3.
                3.2  4,219 bytes of comment that repeated DEVELOPMENT.md and HANDOFF.md cut to a
                     line and a pointer: 250,831 bytes, 9,169 free. Tests 137, checks 57.
+               3.3  v3.3 is built and measured, not pushed: the gate in full (57 checks, 0 failures,
+                    2 not run; both new gates seen red), 138 tests, DELIVERY_RECORD.md rewritten,
+                    the upgrade v3.2 -> v3.3 and the rollback to v3.2 run for real under a
+                    throwaway home (data byte-identical, key note 600, rollback touched 0 files).
+                    The first run found v3.2 leaves tmp-transform/ behind for ever and the
+                    installer made keys.txt 644: both fixed in v3.3. Eight commits on main wait for
+                    Baba's yes to push; 3.1's Test 4 runs right after the push. 2.12's HANDOFF
+                    paragraph is corrected in place and committed; its push waits the same way.
+               4.0  measured, nothing built that carries SSH: the direct route times out here
+                    (ssh teacher-vm, 6 s); oracle/remote.py and walk.py now say `ssh teacher-vm`
+                    and ~/.ssh/config defines it (the direct address, key, ConnectTimeout 15,
+                    BatchMode); route 2 (Cloud Shell) and route 1 (home) are Baba's; the tunnel
+                    teacher-vm is healthy with 4 connections, hostnames maha. and portal. on
+                    ples-duse.org (route 3 needs Baba's yes on his employer's rules, and that zone);
+                    instance-console…:443 answers (route 4, not built on). Oracle's Run Command:
+                    the plugin says RUNNING on this Ubuntu 24.04, a read-only command was ACCEPTED
+                    and never executed in 3 minutes, then cancelled. Written off, as the brief said.
+               4.1  from the Mac only: VM.Standard.A1.Flex, 4 OCPUs, 24 GB, RUNNING, Frankfurt,
+                    created 7.9.2026 07:46 UTC. Inside the machine waits on a route.
+               4.3  the numbers, read on Oracle's own pages 11.9.2026: Always Free A1 is 1,500
+                    OCPU-hours and 9,000 GB-hours a month (2 OCPUs, 12 GB); the FAQ says "if you
+                    have more Ampere A1 Compute instances provisioned than are available for an
+                    Always Free tenancy, all existing Ampere A1 instances are disabled and then
+                    deleted after 30 days unless you upgrade to a paid account"; the price list
+                    says "Each paid tenancy gets the first 3,000 OCPU hours and 18,000 GB hours per
+                    month for free to create Ampere A1 Compute instances"; A1 is $0.01 per
+                    OCPU-hour and $0.0015 per GB-hour. So on Pay As You Go the machine as it is
+                    (4 x 744 h = 2,976 OCPU-hours, 24 x 744 = 17,856 GB-hours in a 31-day month)
+                    stays inside the free 3,000 and 18,000 and costs $0; without that allowance it
+                    would be $56.54 a month at most. Recommendation and the question are in the
+                    session's report to Baba; nothing is resized.
