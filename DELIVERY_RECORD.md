@@ -9,7 +9,7 @@ per release. The decisions are in [`DEVELOPMENT.md`](DEVELOPMENT.md); the state 
 The three files `update.sh` fetches from one commit of `main`, plus the updater itself:
 
     server.py                           108,139 bytes   sha256 a05f8ca596db35c2…
-    static/index.html                   119,918 bytes   sha256 71de5efbc597b989…
+    static/index.html                   121,526 bytes   sha256 f6d575f9af8ce087…
     3sh_i_sample_player_v1_macos.sh      17,694 bytes   sha256 91781c0c8aa38f50…
     update.sh                             6,684 bytes   sha256 dd8084ffe7e1cf25…
 
@@ -20,9 +20,11 @@ The three files `update.sh` fetches from one commit of `main`, plus the updater 
 
 ## WHAT IS NEW
 
-**v3.4, the same evening, two things Baba asked for on the page:** a second click on the playing cell
-stops it (it used to start the take again; only a looping cell stopped), and the bar reads as a mode:
-"mode: PLAY" or "mode: REC", small, at the left, with the settings gear alone on the right and no frame.
+**v3.4, the same evening, three things Baba asked for on the page:** a second click on the playing cell
+stops it (it used to start the take again; only a looping cell stopped); the bar reads as a mode:
+"mode: PLAY" or "mode: REC", small, at the left, with the settings gear alone on the right and no frame;
+and while a cell records, its left corner counts the seconds (from the samples the audio callback
+has received, not a clock) with a level meter above them, the scope keeping the rest of the width.
 Nothing on the server changed but the edition.
 
 **v3.3, earlier that day.** Three fixes and no feature. Two transforms at once no longer read each other's clone (a folder per
@@ -52,10 +54,12 @@ installer creates the key file at mode 600. 4,219 bytes of comment that repeated
     G8 upgrade      pass   see below, run for real on this Mac
     G9 record       this document
 
-    checks run 58, failures 0, not run 2          (v3.3: 57, v3.2: 55)
+    checks run 59, failures 0, not run 2          (v3.3: 57, v3.2: 55)
 
-**The v3.4 gate, "a second click on the playing cell stops it", was seen red** with the stop line
-removed. **And writing it found that the gates' comment stripper had been eating nine tenths of the
+**The v3.4 gates were seen red**: "a second click on the playing cell stops it" with the stop line
+removed, and "a recording cell shows its seconds and a level meter" with the seconds line removed (its
+first slice was empty, spinFrame being defined before paint, and it went red on that too, as a slice
+should). **And writing it found that the gates' comment stripper had been eating nine tenths of the
 page**: a closing `*/` on its own line begins with a star, the stripper dropped star lines before
 matching comments, and every block comment ran on to the next `*/` that ended a text line. The
 page's stripped code was 11,833 of 112,337 characters. Fixed (comments first, lines second); the
@@ -191,6 +195,8 @@ day this code ran where it is meant to run. Each line is a thing that was on NOT
   server: "mode: REC" small at the left, the gear at the right. The second click was not clicked.*
 - **The launcher's panel and its keys** (o, f, l, r, u, q): the server was started the launcher's way,
   the panel was not driven.
+- **The recording corner, the seconds and the meter**: they need a microphone and a person pressing
+  REC, and were not looked at. Baba sees them on his next take.
 - **The soak and the monkey**; cold start, memory and battery.
 
 ## KNOWN
@@ -205,4 +211,4 @@ day this code ran where it is meant to run. Each line is a thing that was on NOT
   installer from `raw/main`, which is cached 300 s. Seen at 17:51 on 11.9.2026 with v3.3 installed.
 - **The six Croatian takes** put into cells 1 to 6 of project-01 for the measurement are Baba's to
   keep or delete.
-- **7,565 bytes of the source budget remain.**
+- **5,957 bytes of the source budget remain.**

@@ -215,6 +215,12 @@ it to the left side of the screen, make the button smaller, and settings on the 
 So `bar()` puts a small "mode: PLAY" / "mode: REC" first, then the spacer, the page arrows, and a bare
 gear. `mk()` sets `flex: 1` inline, which beats a class, so the button's width is set inline too.
 
+Same evening again: "in the sample cell in the left corner, just count the seconds while I'm
+recording, and above the seconds put a V meter." The seconds come from the samples the audio callback
+has received, so they are the take's true length and not a clock that keeps counting through a
+dropped block; the meter is the block's RMS from -50 to 0 dBFS, fast up and slow down, with a held
+peak line, amber and red past nine tenths. The scope keeps the width to the right of the corner.
+
 **And the gate written for the click found the gates half blind.** `code_only` dropped every line
 beginning with a star before matching block comments, so a comment's own closing `*/` line vanished
 and each `/*` ran on to the next `*/` that ended a text line: 11,833 of the page's 112,337 characters

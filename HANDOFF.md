@@ -78,7 +78,8 @@ Identical to the phone, cell for cell, so a project directory copies between the
 
 A grid that fills the window. Right-click a cell for its menu; left-click is the press.
 
-    REC     click a cell to record into it, click again to stop
+    REC     click a cell to record into it, click again to stop; while it records, its left corner
+            counts the seconds with a level meter above them
     PLAY    click a cell to play from there; click it again to stop; a marked cell toggles its loop
 
 Recording over a cell that already holds a take **or a line** asks first, and offers **Play** as
@@ -322,7 +323,7 @@ The reasoning behind each is in the brief.
 ## RUNNING THE CHECKS
 
     python3 tests/test_server.py     138 cases, no network, no browser (three need ffmpeg)
-    python3 scripts/gates.py         58 checks, 2 honestly not run
+    python3 scripts/gates.py         59 checks, 2 honestly not run
 
 ## WHAT HAS NEVER BEEN PROVEN
 

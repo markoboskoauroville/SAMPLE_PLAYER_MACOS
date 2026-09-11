@@ -314,6 +314,12 @@ pressed = page_code[page_code.find("function press("):page_code.find("function s
 check("G6", "a second click on the playing cell stops it",
       0 < len(pressed) < 2000 and -1 < pressed.find("S.playing === i) return stopAudio()") < pressed.find("return play(i)"),
       "%d characters of press(): stop is decided before play (Baba, 11.9.2026)" % len(pressed))
+_m = re.search(r"\nfunction paint\(.*?(?=\nfunction )", page_code, re.S)     # paint() up to the next function
+painted = _m.group(0) if _m else ""
+check("G6", "a recording cell shows its seconds and a level meter",
+      0 < len(painted) < 6000 and "scope.samples / scope.rate" in painted and "scope.level" in painted
+      and "scope.samples += block.length" in page_code,
+      "%d characters of paint(): seconds from the samples counted in the audio callback, the meter from the level (Baba, 11.9.2026)" % len(painted))
 skip("G6", "the soak and the monkey", "needs a Mac with a microphone and a browser")
 
 # ── G7 BUDGETS ────────────────────────────────────────────────────────────────────────────────
