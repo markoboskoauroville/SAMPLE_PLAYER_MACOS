@@ -43,4 +43,6 @@ new test is not believed until it has been seen failing on the old code.
 - **A local engine needs no key, no credit probe and no spend line.**
 - **Ask before:** tunnelling SSH through the company network, restarting or resizing the Oracle machine, anything that costs money, writing
   anybody's consent note (the words are his), deleting anything, and pushing to `main` or `master`.
+- **Never create a second Oracle machine, not even for a test** (Baba, 11.9.2026). At 4 OCPUs and 24 GB
+  the one machine uses almost the whole free allowance of a paid tenancy; a test machine for a day goes over it.
 - **Do not touch** `MANTRA_MANIFEST/EXCHANGE.md` or anything belonging to THE BRAIN BRAKE.

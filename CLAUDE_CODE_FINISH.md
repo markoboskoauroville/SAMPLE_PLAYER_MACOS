@@ -272,11 +272,11 @@ Everything on the machine is installed from the internet, never copied from the 
   used while `walk.py` runs, sampled every second (`free -m` in a loop with a counted end). Write all of
   it into `ABLETON_TEACHER/lessons/oracle-vm.md` with the date.
 
-- [ ] **4.2 The account, asked, not guessed.** Ask Baba to open the Oracle Cloud console and read two
+- [x] **4.2 The account, asked, not guessed.** Ask Baba to open the Oracle Cloud console and read two
   things aloud: the trial's end date, and whether the account is still Free Tier or upgraded to Pay As
   You Go. Write both down.
 
-- [ ] **4.3 The decision, with numbers.** Two choices, and give Baba your recommendation:
+- [x] **4.3 The decision, with numbers.** Two choices, and give Baba your recommendation:
   - **Resize to 2 OCPUs and 12 GB, free.** Possible only if 4.1's peak memory fits in 12 GB with room;
     say which services are the big ones if it does not. Expect transcription and speech roughly twice as
     slow; `walk.py` will say.
@@ -284,7 +284,8 @@ Everything on the machine is installed from the internet, never copied from the 
     price list **on the day**, subtract the free 1,500 and 9,000 hours, and give him the monthly figure.
   Wait for his yes before 4.4.
 
-- [ ] **4.4 The resize, if chosen.** First read `oci compute instance update --help` and Oracle's page on
+- [ ] **4.4 The resize, if chosen.** *11.9.2026: not chosen. Baba upgrades to Pay As You Go himself and
+  keeps 4 and 24; this step runs only if 4.6 finds a compute charge. Left unticked until then.* First read `oci compute instance update --help` and Oracle's page on
   changing the shape of an instance: **changing a running instance's shape restarts it**; confirm that on
   the page and tell Baba before doing it. Check that every service is enabled to start at boot
   (`systemctl is-enabled …`) before, not after. Then:
@@ -297,7 +298,20 @@ Everything on the machine is installed from the internet, never copied from the 
   4.1's measurements again (nproc must say 2), every service active, the door's health answers, and
   `python3 oracle/walk.py` passes — write its counts and times beside the 7.9.2026 baseline.
 
-- [ ] **4.5 The records corrected in place.** `~/.oci/teacher-vm.json` (ocpus, gb); `oracle/vm.py`,
+- [ ] **4.5 The records corrected in place.** *(only the allowance wording; ocpus and gb stay 4 and 24
+  unless 4.4 runs)*
+
+- [ ] **4.6 The cost, checked after a week, on 18.9.2026 or the first session after it.** Baba, 11.9.2026:
+  "After one week, check the cost. If any compute charge appears, tell me, and we shrink the machine to
+  2 cores and 12 GB. Do not create any second machine, even for a test." From the Mac, over HTTPS:
+
+      T="$(grep -m1 '^tenancy' ~/.oci/config | sed 's/.*= *//')"
+      oci usage-api usage-summary request-summarized-usages --tenant-id "$T" \
+          --time-usage-started 2026-09-01T00:00:00Z --time-usage-ended 2026-10-01T00:00:00Z \
+          --granularity MONTHLY --query-type COST --group-by '["service"]'
+
+  On 11.9.2026 (still in the trial) every service was 0.0 EUR. If Compute is above zero, tell Baba the
+  number and wait for his yes before 4.4. The one-euro budget alarm made the same day emails him first. `~/.oci/teacher-vm.json` (ocpus, gb); `oracle/vm.py`,
   whose default is still 4 and 24 and whose docstring still says "Always Free: A1 up to 4 OCPU and 24
   GB" — quote the old wording with the date; `lessons/oracle-vm.md`; and
   `MANTRA_MANIFEST/modules/free-machine.md` if anything there is still wrong.
@@ -439,3 +453,8 @@ Each session adds a line: date, what was ticked, commits, what is blocking.
                count proving it. 2.12 closed: HANDOFF corrected, the record pushed. ABLETON_TEACHER
                pushed too (9e2346e). Still open in Part 2: 2.5, 2.6, 2.8, 2.9, 2.11 (his hands and
                ears); Part 4 waits on his network answer and the Oracle decision.
+    11.9.2026  Baba's answer, question 2 (4.2, 4.3): "I'm upgrading to Pay As You Go myself", the
+               trial ends around 7.10.2026, keep 4 and 24, a one-dollar alarm, check the cost after
+               a week, shrink only if a compute charge appears, never a second machine. The usage
+               API answered from the Mac: this month Compute, Block Storage, Network, Telemetry all
+               0.0 EUR (the tenancy bills in EUR, so the alarm is one euro). 4.6 added for the check.
