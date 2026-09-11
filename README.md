@@ -39,6 +39,10 @@ honest version of `curl | bash`:
 
 - [`HANDOFF.md`](HANDOFF.md) — the finished state of the app. Start here to pick it up.
 - [`DEVELOPMENT.md`](DEVELOPMENT.md) — every decision and why, and what is not ported yet.
+- [`DELIVERY_RECORD.md`](DELIVERY_RECORD.md) — what was measured for the current release, what
+  failed on the way, and what was not tested.
+- [`NEXT_SESSION_VOICE_TRANSFORM.md`](NEXT_SESSION_VOICE_TRANSFORM.md) — the voice transform brief,
+  with its three questions answered.
 
 The phone edition is [`SAMPLE_PLAYER`](https://github.com/markoboskoauroville/SAMPLE_PLAYER).
 The two share a storage layout cell for cell, so a project directory copies between them.
