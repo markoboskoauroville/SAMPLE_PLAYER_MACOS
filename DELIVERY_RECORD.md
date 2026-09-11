@@ -134,4 +134,11 @@ Chromium, says to press q and start again.
   be taught a warning it does not have.
 - **`sampleplayer-update` from a second terminal** leaves the panel's old server running until q is
   pressed. The page says so; the updater does not stop it.
+- **For five minutes after a push, `update.sh` can install a mixture of two versions.** GitHub's raw
+  files are cached for 300 seconds, per file, and the updater fetches its three files separately.
+  Measured at this delivery: server and page arrived as v3.2 while the installer arrived as v3.1 and
+  the updater announced "v3.1". Here the installers differed only in that word; a release where they
+  differ in substance would install half of each. Fetching by commit rather than by `main` would close
+  it, and is a change to the updater, so it is not in this release. Run on a fresh home five minutes
+  later: "all three arrived intact — v3.2", server and page matching the build byte for byte.
 - **6,599 bytes of the source budget remain.**
