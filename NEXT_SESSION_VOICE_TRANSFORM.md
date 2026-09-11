@@ -1,0 +1,197 @@
+# NEXT SESSION — the voice transform engine
+
+**A brief for whoever picks this up. Read [`HANDOFF.md`](HANDOFF.md) first for what the app is.**
+
+Written 31.8.2026 at the end of a long session, so that the next one starts from what is known
+rather than rediscovering it. Everything below marked *measured* was run against live systems.
+
+---
+
+# 1. WHAT BABA ASKED FOR, IN HIS WORDS
+
+> "I clone my friend's voice or another actor in the film who gave clear permission. And then in the
+> timeline I right-click and it just picks up my own performance and just changes the voice. It
+> follows closely the timings, it's a lip sync. Complete lip sync."
+
+That is DaVinci Resolve's **Voice Convert**, and it is the correct thing to aim at.
+
+# 2. THE DISTINCTION THAT DECIDES THE WHOLE DESIGN
+
+**Do not skip this. Building the wrong one produces something that sounds fine in isolation and is
+useless against picture.**
+
+| | takes | timing of the result |
+|---|---|---|
+| **Text-to-speech cloning** | **text** + a reference wav | the model's invention |
+| **Speech-to-speech conversion** | **his audio** + a reference | **his, untouched** |
+
+`MANTRA_VOICE` — which is already installed on his Mac — does the **first**. Qwen3-TTS and
+chatterbox are zero-shot TTS. They have never heard the performance, so the pauses, the emphasis,
+the breath before the hard line do not survive. Against picture it drifts inside one sentence.
+
+His own API confirms it: `/hear` and `/say`, and no `/convert`.
+
+# 3. WHAT IS ALREADY ON THE MAC
+
+Private repo **`MANTRA_VOICE`**. Read its `README.md` and `API.md` before writing anything.
+
+    voiced.py    Flask on 127.0.0.1:8837, always up via a LaunchAgent
+    clone.py     the clone models behind ~/.voice/clone.sock
+    ears.py      Whisper (mlx-whisper) behind ~/.voice/ears.sock
+    timing.py    aligns heard words to written words — HALF THE JOB IS ALREADY HERE
+
+    POST /hear?words=1   → {"words": [{"w": "Can", "t": 0.12, "d": 0.3}, …]}
+    POST /say            → mp3 + tokens + sents
+    GET  /health         → {"engine": "clone", "voice": "voice1", "model": "qwen06"}
+
+    No key. CORS open. Any app on the Mac may call it.
+
+Models, all free, all local, on the GPU through **mlx-audio**:
+
+| key | model | size | clones from |
+|---|---|---|---|
+| `qwen06` | `mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit` | 2.0 GB | reference wav **+ its words** |
+| `qwen17` | `mlx-community/Qwen3-TTS-12Hz-1.7B-Base-8bit` | 3.1 GB | the same, bigger |
+| `turbo` | `mlx-community/chatterbox-turbo-8bit` | 1.2 GB | reference wav **alone**, English |
+
+**"The voice is shown, not trained."** Zero-shot: twelve seconds of reference, one speaker. There
+is nothing to train and nothing to store but the wav. Adding a voice is one ffmpeg cut.
+
+# 4. THE TWO PATHS, AND WHICH TO BUILD FIRST
+
+## PATH A — performance-locked cloning, using only what is installed
+
+1. `POST /hear?words=1` on Baba's take → **his** words, each with `t` and `d`
+2. `POST /say` in the friend's cloned voice → the line, wrong rhythm
+3. `POST /hear?words=1` on the clone → **their** words with times
+4. Stretch each of their words onto his word's start and duration
+
+His rhythm, his pauses, his emphasis placement, their timbre. `timing.py` already does step 4's
+alignment.
+
+**The honest limit, and it must be told to him plainly:** where his word is much longer than
+theirs, the stretch smears. Past roughly **1.3×** it is audible, and below **0.75×** it chirps.
+
+Mitigations, in order of how much they buy:
+- stretch at **phrase** level rather than per word when a word's ratio is extreme
+- **`rubberband`** rather than `atempo`, so formants hold — ffmpeg has it
+- spread the difference into the **silences** either side of a word before stretching the word
+  itself. A pause can absorb 300 ms with no artefact at all; a vowel cannot
+
+**Build this first.** It reuses the socket, costs nothing per line, and within an hour he can hear
+whether the smearing matters on *his* voice against *his* picture. If it does, the next path becomes
+a justified install rather than a guess.
+
+## PATH B — real speech-to-speech conversion
+
+Candidates, best first for this case:
+
+| | zero-shot | notes |
+|---|---|---|
+| **seed-vc** | yes, a few seconds | closest to Resolve's behaviour. The one to try first |
+| **OpenVoice v2** | yes | tone-colour conversion; strong, well documented |
+| **knn-vc** | yes | simplest of the three, surprisingly good |
+| **RVC** | **no** — trains per voice | best quality, but minutes of audio and a training step |
+
+**None is on MLX.** They are torch, so on the Mac they run on CPU or MPS rather than the clean GPU
+path everything else uses. That is the real cost of Path B, and it is why Path A is first.
+
+# 5. THE FREE COMPUTE QUESTION, ANSWERED
+
+Baba asked whether Streamlit Cloud, Oracle Cloud and Colab can host this. They are three very
+different things and only one of them is a serving platform.
+
+## Oracle Cloud Always Free — **YES, and it is the real answer**
+
+    Ampere A1 (ARM):  up to 4 OCPUs and 24 GB RAM, always free, no expiry
+    2 AMD micro VMs:  1/8 OCPU, 1 GB each — too small for this
+    Public IP, persistent, root, 10 TB egress a month
+    NO GPU on the free tier
+
+**24 GB of RAM is a lot**, and ARM CPU inference for small TTS/VC models is slow but real. He is
+already running one: `MAHA_TRANSCRIBE_VM` is described as "an always-free ARM VM".
+
+This is the only one of the three that can be **an API endpoint his phone calls**. That matters:
+the Android app cannot reach `127.0.0.1:8837` on the Mac, so anything the phone needs must live
+somewhere with an address.
+
+**What to check first:** `nproc`, `free -g`, and whether his tenancy is in a region where A1
+capacity is actually available — Oracle frequently answers "out of host capacity" for A1, which is
+the single most likely blocker and has nothing to do with his account.
+
+## Google Colab free — **for experiments, not for serving**
+
+    T4 GPU, ~12 hour ceiling, disconnects on idle, no fixed address
+    Serving through a tunnel is against the spirit of the terms and gets accounts limited
+
+**Use it to answer questions, not to answer requests.** It is the right place to benchmark seed-vc
+against OpenVoice against knn-vc on Baba's own voice and Manan's, and report seconds-per-second and
+a listenable wav. That is a day's work that would take a week on ARM CPU.
+
+## Streamlit Community Cloud — **no, and it is not that kind of thing**
+
+    CPU only, ~1 GB RAM, sleeps after inactivity, cold start measured in tens of seconds
+    It hosts an app, not an API
+
+It cannot hold a 2 GB model, let alone run one. It is fine as a **control panel** — a page that
+shows what the Oracle box is doing — and nothing more.
+
+## NVIDIA — **worth a real look, and he asked specifically**
+
+Two separate things, do not confuse them:
+
+**`build.nvidia.com` (NIM)** — hosted models with free credits, OpenAI-shaped API. Ask it for:
+- **Parakeet** ASR. On English it is faster and more accurate than Whisper large, by a wide margin.
+  A genuine Whisper replacement for `ears.py`.
+- **FastPitch / RAD-TTS / Magpie** TTS, and check whether any exposes a **voice-conversion** or
+  speaker-reference endpoint. If one does, Path B may need no local install at all.
+
+**NeMo** — the same models, open source, to run on the Oracle box or in Colab. ARM CPU support is
+the thing to verify; NeMo is CUDA-first and ARM is not its happy path.
+
+**What to measure and report back:** free credit size, rate limits, whether a voice reference can be
+supplied at all, and latency for one sentence.
+
+## The ranking, for serving
+
+    1  Oracle A1          persistent, free, has an address. CPU-only, so small models
+    2  NVIDIA build API   free credits, real GPU, someone else's problem to keep up
+    3  Colab              experiments and benchmarks only
+    4  Streamlit          a control panel, nothing more
+
+# 6. WHAT TO BUILD IN THE APP
+
+The UI is the same whichever engine wins, so none of it is wasted.
+
+- **A file picker** that takes any recording, cuts twelve seconds with ffmpeg, and adds a voice
+- **The voice list** beside Speechify and Hume, with local clones marked as **free**
+- **Transform this cell**: take the recording in a cell, keep its performance, change the timbre
+- **The cell keeps the original**, exactly as it does for generated voices — `gen/<engine>.wav`
+  beside `original.wav`, never over it
+
+**Consent belongs in `meta.json` beside `ref.wav`: who, when, and what for.** Baba raised this
+himself — *"who give clear permission"*. A cloned voice with no consent note attached is the one
+that causes trouble in two years when nobody remembers. Make the field required by the picker.
+
+# 7. HOW TO WORK
+
+- `MANTRA_MANIFEST` first. `keyring.md` §2c–§2i for anything touching a key, and
+  `generating-audio.md` for anything touching an engine.
+- The gates and Test 1 run on every change: `python3 tests/test_server.py` and
+  `python3 scripts/gates.py`. They are green today at 96 and 49.
+- **Measure, do not assume.** Every hard-won thing in this repository came from running something
+  against a live system and being surprised. The model names in a probe were all retired; the role
+  data was in the name and not the tags; AssemblyAI's cheap probe was called impossible until it
+  was tried.
+- **A local engine needs no key, no credit probe and no spend line.** Do not bolt it onto the key
+  ring because the key ring is there.
+
+# 8. THE FIRST THREE QUESTIONS TO ANSWER
+
+Before writing app code, answer these — they change what gets built:
+
+1. **Does his Oracle tenancy actually have A1 capacity?** `nproc`, `free -g`, region.
+2. **Does `build.nvidia.com` expose voice conversion, or only TTS?** If conversion, Path B is an
+   API call rather than an install.
+3. **On his own voice, how bad is the smearing in Path A?** One line, one friend's reference, his
+   own ears. That answer decides whether Path B is needed at all.

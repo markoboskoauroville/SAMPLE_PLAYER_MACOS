@@ -6,6 +6,12 @@ Installer edition v3.1. Repository public at `markoboskoauroville/SAMPLE_PLAYER_
 
 Every decision and every gap is in [`DEVELOPMENT.md`](DEVELOPMENT.md).
 
+**The next piece of work is specified in
+[`NEXT_SESSION_VOICE_TRANSFORM.md`](NEXT_SESSION_VOICE_TRANSFORM.md)** — cloning a voice from a
+recording and changing the timbre of a take while keeping its performance. Read that before
+starting it: it opens with a distinction that decides the whole design, and building the wrong side
+of it produces something that sounds fine alone and is useless against picture.
+
 ---
 
 ## WHAT IT IS
@@ -242,6 +248,39 @@ invented price would look exactly as certain as the measured count beside it.
 The log holds no key, no account name, not even a fingerprint.
 
 ---
+
+## A THIRD ENGINE IS AVAILABLE AND NOT YET WIRED
+
+`MANTRA_VOICE` is already installed on this Mac: a Flask server always up at **127.0.0.1:8837**,
+with Whisper behind one socket and zero-shot voice cloning behind another.
+
+    POST /hear?words=1   every word with its time — the ears
+    POST /say            text to speech in a cloned voice — the mouth
+    GET  /health         which engine, voice and model are current
+
+    No key. CORS open. Any app on this Mac may call it.
+
+**It is free and local**, so it needs no key ring entry, no credit probe and no spend line — and it
+should not be bolted onto those merely because they exist.
+
+Its clone models are **text-to-speech**, not voice conversion. They take words and a twelve-second
+reference; they have never heard a performance. That difference is the whole subject of
+[`NEXT_SESSION_VOICE_TRANSFORM.md`](NEXT_SESSION_VOICE_TRANSFORM.md).
+
+## WHERE FREE COMPUTE ACTUALLY EXISTS
+
+Asked and answered 31.8.2026, because it decides what the phone can reach:
+
+- **Oracle Cloud Always Free** — Ampere A1, up to 4 OCPUs and 24 GB RAM, persistent, public IP, no
+  GPU. The only one of the three that can be an endpoint the phone calls. Baba already runs
+  `MAHA_TRANSCRIBE_VM` on one.
+- **`build.nvidia.com`** — hosted models with free credits. **Parakeet** is a genuine Whisper
+  replacement for English, faster and more accurate.
+- **Google Colab** — a T4 for twelve hours at a time, no fixed address. For benchmarks, not for
+  serving.
+- **Streamlit Community Cloud** — CPU, about 1 GB, sleeps. A control panel, not a model host.
+
+The reasoning behind each is in the brief.
 
 ## RUNNING THE CHECKS
 
