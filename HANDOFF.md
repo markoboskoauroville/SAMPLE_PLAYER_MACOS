@@ -2,7 +2,7 @@
 
 **The finished state of the app. Nothing about how it got here.**
 
-Installer edition v3.2. Repository public at `markoboskoauroville/SAMPLE_PLAYER_MACOS`.
+Installer edition v3.3. Repository public at `markoboskoauroville/SAMPLE_PLAYER_MACOS`.
 
 Every decision and every gap is in [`DEVELOPMENT.md`](DEVELOPMENT.md).
 
@@ -321,21 +321,25 @@ The reasoning behind each is in the brief.
 
 ## RUNNING THE CHECKS
 
-    python3 tests/test_server.py     137 cases, no network, no browser (three need ffmpeg)
-    python3 scripts/gates.py         56 checks, 2 honestly not run
+    python3 tests/test_server.py     138 cases, no network, no browser (three need ffmpeg)
+    python3 scripts/gates.py         57 checks, 2 honestly not run
 
 ## WHAT HAS NEVER BEEN PROVEN
 
-**Nothing here has run on a Mac.** Written and checked on Linux; the pure functions were walked
-directly and the key probes were run against live keys, but no part of the following has been
-executed there: the installer, the virtual environment, the launcher, the port file, Chrome
-opening, `getUserMedia`, the recorder, the resampler, the editor's drag, the loop, or the playhead.
+> Until 11.9.2026 this said "Nothing here has run on a Mac" and "The transform has never met the real
+> models". Corrected in place that day, when it did.
 
-The likeliest first failure is the microphone: Chrome grants it to `127.0.0.1` without a
-certificate and Safari does not always.
+**Run on this Mac, 11.9.2026 (v3.2 and v3.3):** the installer, the updater, the virtual environment,
+the server started the launcher's way, the port file, Homebrew's ffmpeg (without rubberband, so
+atempo), MANTRA_VOICE under its LaunchAgent after a pull, the real ears and the real clone on seven
+lines of Baba's, the transform on real speech (worst edge 40 ms, tokens matching words 7 of 7), a
+60-second take, the upgrade from v3.2 and the rollback to it. The numbers are in `DELIVERY_RECORD.md`.
 
-**The transform has never met the real models.** Its route was driven over HTTP against a stand-in
-for `/hear` and `/say` in their exact shapes, with a real mp3 and real rubberband; the page was walked
-in Chromium on Linux; the consent routes ran against MANTRA_VOICE's real code with real ffmpeg cuts.
-Not run: Whisper's actual word times on his voice, a real clone's line, how the stretch **sounds**,
-Homebrew's ffmpeg, and MANTRA_VOICE under its LaunchAgent after a pull.
+**Still not proven:** the launcher's panel and its keys, Chrome on macOS (`getUserMedia`, the recorder,
+the resampler, the editor's drag, the loop, the playhead, the file chooser, the badge colours), how the
+transform **sounds** against picture, and the four English lines still to be recorded. The likeliest
+first failure is still the microphone: Chrome grants it to `127.0.0.1` without a certificate and Safari
+does not always.
+
+**Croatian is not "no alignment", it is a translation**: the English ears turn a Croatian take into an
+English sentence with word times, and the transform runs to the end on it. Measured 11.9.2026.

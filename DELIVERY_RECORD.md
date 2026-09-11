@@ -1,119 +1,89 @@
-# DELIVERY RECORD — Sample Player, macOS — v3.2 — 11.9.2026
+# DELIVERY RECORD — Sample Player, macOS — v3.3 — 11.9.2026
 
 **What was measured for this release, what failed on the way, and what was not tested.** Rewritten
 per release. The decisions are in [`DEVELOPMENT.md`](DEVELOPMENT.md); the state is in
-[`HANDOFF.md`](HANDOFF.md).
+[`HANDOFF.md`](HANDOFF.md). The v3.2 record is in git history at commit 4bba925.
 
 ## ARTEFACT
 
-The three files `update.sh` fetches from `main`, plus the updater itself:
+The three files `update.sh` fetches from one commit of `main`, plus the updater itself:
 
-    server.py                          110,651 bytes   sha256 d8bb5f83250180e6…
-    static/index.html                  119,644 bytes   sha256 f5960d7b2528edf1…
-    3sh_i_sample_player_v1_macos.sh     17,475 bytes   sha256 0819455c8b09e255…
-    update.sh                            5,631 bytes   sha256 00c35bb66b4da7e3…   (unchanged)
+    server.py                           108,139 bytes   sha256 fbeabe56ef9fa2df…
+    static/index.html                   119,039 bytes   sha256 ca76b2a5ec280ebf…
+    3sh_i_sample_player_v1_macos.sh      17,577 bytes   sha256 0d8e28fa47dc29cb…
+    update.sh                             6,684 bytes   sha256 dd8084ffe7e1cf25…
 
-    VERSION     new v3.2    previous v3.1, commit fbbbc2b on main before this merge
-    DEPENDS ON  MANTRA_VOICE master from commit 49a07a2 for the consent note.
-                The transform itself works with older MANTRA_VOICE.
+    VERSION     new v3.3    previous v3.2, commit 4bba925 on main
+    DEPENDS ON  MANTRA_VOICE master from commit 49a07a2 for the consent note (8fc0373 is on this Mac).
+    BUILT BY    Claude Code on Baba's Mac, from this repository's tree: the first edition made where
+                it runs. No CI; accepted in the record as v3.2's was.
 
 ## WHAT IS NEW
 
-The voice transform, Path A: a take keeps its performance and gets a cloned voice's timbre. Cloned
-voices listed with a consent badge. A voice cannot be added without who gave it, what for, and public
-or private. A take from a voice not cleared for release downloads with PRIVATE in its file name.
+Three fixes and no feature. Two transforms at once no longer read each other's clone (a folder per
+transform, removed when it ends; `write_wav` through `mkstemp`, so one cell from two tabs finishes two
+whole files). The updater fetches the installer, the server and the page from one commit rather than
+three separately cached files from `main`. Stale transform folders are swept at start, and the
+installer creates the key file at mode 600. 4,219 bytes of comment that repeated the documents were cut.
 
 ## GATES — `python3 scripts/gates.py`, on the committed tree
 
-    G1 provenance   pass   clean tree, server and installer agree on v3.2, the updater fetches
-                           exactly the three files
-    G2 secrets      pass   12 files scanned, no key-shaped literal; NEW: the transform section
-                           (17,464 characters) holds no ring, probe, spend line or key file
-    G3 analysis     pass   the server parses, both scripts bash -n clean, the page's brackets
-                           balance (505/505, 1540/1540, 179/179), 46 onclick handlers all exist,
-                           31 server routes, 28 called by the page, none missing
-    G4 dead code    pass   100 server functions, 33 routes, unreached none; page functions,
-                           unreached none
-    G5 dead loops   pass   9 whiles in the server, unbounded none; every request through one
-                           wrapper with a timeout; every subprocess with a timeout
-    G6 stress       pass   NEW, five: the transform writes into gen/ and nowhere else; it names
-                           engine clone and checks the answer; the consent note is checked before
-                           the upload is kept; the download name carries the release suffix; only
-                           .wav files count as generated voices
-                    not run: the soak and the monkey, which need a Mac with a microphone
-    G7 budgets      pass   253,401 bytes of source against a 260,000 ceiling. 6,599 bytes are
-                           left: the next feature starts with a trim
-                    not run: cold start, memory and battery, which need the machine
-    G8 upgrade      pass   see below, run for real rather than asserted
+    G1 provenance   pass   clean tree, server and installer agree on v3.3, the updater resolves main
+                           to one commit and fetches exactly the three files from it (NEW)
+    G2 secrets      pass   files scanned, no key-shaped literal; the transform section holds no ring,
+                           probe, spend line or key file
+    G3 analysis     pass   the server parses, both scripts bash -n clean, the page's brackets balance,
+                           every onclick handler exists, every route the page calls exists
+    G4 dead code    pass   server functions and routes, unreached none; page functions, unreached none
+    G5 dead loops   pass   whiles bounded; every request through one wrapper with a timeout; every
+                           subprocess with a timeout; the Run Command poll and the test's barrier
+                           both have deadlines
+    G6 stress       pass   the five of v3.2, and NEW: two transforms at once cannot share a temporary
+                           file (a fixed name in transform_cell or write_wav is red)
+                    not run: the soak and the monkey
+    G7 budgets      pass   251,439 bytes of source against a 260,000 ceiling: 8,561 free after the
+                           trim (v3.2 had 6,599)
+                    not run: cold start, memory and battery
+    G8 upgrade      pass   see below, run for real on this Mac
     G9 record       this document
 
-    checks run 55, failures 0, not run 2          (v3.1: 49 checks)
+    checks run 57, failures 0, not run 2          (v3.2: 55)
 
-**Every new gate was seen red** by removing the protection it guards, one at a time: writing over the
-take, dropping the engine check, adding a spend line to the transform, dropping the release suffix, and
-keeping the upload before checking the note.
+**Both new gates were seen red**: the fixed folder and the fixed `.tmp` name each put back in turn,
+and the updater's commit resolution removed.
 
 ## TESTS — `python3 tests/test_server.py`
 
-    135 cases, 0 failures                         (v3.1: 96)
+    138 cases, 0 failures                         (v3.2: 135)
 
-The new ones cover the stretch plan's invariants, the edge snapping, consent, the badge, the stricter
-word winning, the release name, the note that came back, and the generated-voice list. One case runs
-real ffmpeg and rubberband and measures the rendered track: **worst word edge 7.5 ms from his timing,
-over 4 segments.**
+The three new ones: two threads transform two cells against a stand-in MANTRA_VOICE answering two
+clips of different loudness, with a barrier at the decode so the collision is certain — **red on v3.2
+every run** (both cells came out at the loud clip's peak 13,345; after the fix 1,950 and 13,345); the
+transform's temporary folder is gone when it ends; stale folders are swept at start.
 
-**Twelve deliberate breakages, each caught.** The code was broken twelve ways — no absorbing, starting
-far too early, joining across a breath, never joining, a private take named public, the looser word
-winning, edges not snapped, rubberband's lead ignored, a future date allowed, Finder files as voices,
-any note as public, Whisper's nonsense believed — and a test went red for each.
+## G8 — UPGRADE, AND THE WAY BACK, RUN FOR REAL ON THIS MAC
 
-## G8 — UPGRADE, AND THE WAY BACK
+Under a throwaway home. v3.2's three files from commit 4bba925, installed with its own installer,
+checked to be v3.2, and used: a real take recorded into cell 3 through `/api/record`, words, loop, in
+and out points, a label-only key note at mode 600, rates, a `.DS_Store` in `gen/`, and a transform
+with the real MANTRA_VOICE (voice marko, no consent note). The server stopped as the panel's `u` stops
+it, v3.3 installed over it, the server started again.
 
-**Forward, v3.1 to v3.2, run for real.** v3.1 installed with its installer under a throwaway home,
-checked to be v3.1 (`/api/clones` answered 404), and used: a recorded cell with a Speechify take, loop
-on, in and out points, a key note at mode 600, rates, and a `.DS_Store` in the cell's `gen/`. v3.2
-installed over it.
-
-    every data file, the key note and the rates    byte-identical (7 files)
+    /api/version                                   v3.3; /api/clones 200
+    every data file, the key note and the rates    byte-identical (6 files)
     keys.txt mode                                  600, kept
-    loop, in 120, out 1800                         kept
-    generated voices of that cell                  v3.1 ['.DS_Store', 'speechify'] -> v3.2 ['speechify']
-    the Speechify take's download name             "Scene six, the lift.wav", unchanged
-
-**Back, v3.2 to v3.1, run for real.** A private-voice transform made on v3.2, then v3.1 installed
-over it.
-
-    v3.1 reads the cell                            yes: plays transform-kristijan, 3000 ms
-    v3.1 downloads the take                        the exact file
-    files touched by the rollback                  none (digests compared)
+    meta: words, loop, in 120, out 1800, report    kept, byte for byte
+    the transform plays                            200, 398,942 bytes
+    the download name                              "Scene six, the lift (PRIVATE voice marko, not for release).wav", unchanged
+    a transform again on v3.3                      ok; no tmp-transform* folder left, no .tmp in gen/
     tracebacks                                     0
-    forward to v3.2 again                          the PRIVATE name is back
 
-**Across the two apps.** v3.2 against MANTRA_VOICE's `master` from before this release, running for
-real: the add is refused with the update command, the voice shows red, and `/consent` names the
-older MANTRA_VOICE rather than failing on a 404 page. And the v3.2 page served by a v3.1 server, in
-Chromium, says to press q and start again.
+**Back, v3.3 to v3.2.** v3.2 installed over it: v3.2 reads the cell (200, the same bytes), the same
+download name, **files touched by the rollback: 0** (digests compared), tracebacks 0. Forward to v3.3
+again: the same name, and the second install changed nothing.
 
-## FAILED ON THE WAY
-
-- **A voice added with a note ended up with none.** MANTRA_VOICE wrote `meta.json` after the ears, and
-  the ears timed out. Fixed in MANTRA_VOICE: the note is written when the cut exists.
-- **An older MANTRA_VOICE answers ok and drops the note.** Measured on its master branch. The add is now
-  judged by the note that came back.
-- **A word rescued exactly to 0.75x was reported as a chirp**, by floating point.
-- **`.DS_Store` counted as a generated voice** in v3.1, seen live.
-- **Two new tests proved nothing** until the code was broken to check them: one never reached the rule
-  it named, and one mutation harness run was misattributed by stale bytecode.
-- **Two sandbox commands killed their own shell**, by matching a process name the command itself
-  contained. The tests now record process ids in files.
-- **One "old version" check ran the new code**, because a worktree of `main` failed (MANTRA_VOICE's
-  branch is `master`) and Python imported from the current folder. Caught by asserting the imported
-  file's path before believing the result.
-- **Found after delivery, 11.9.2026, for the next edition: two transforms at once overwrote each
-  other's clone.** The server is threaded and the clone's audio went to one fixed folder. A test with
-  two threads and two clips of different loudness had both cells come out loud. Fixed with a folder
-  per transform and `mkstemp` in `write_wav`; a new gate refuses a fixed temporary name. Tests 137,
-  gates 56.
+**The first run of this test found a fault**: after v3.3's transform one temporary folder remained. It
+was v3.2's fixed `tmp-transform/`, which v3.2 never removed. v3.3 now sweeps `tmp-transform*` at start.
 
 ## MEASURED ON THE MAC, 11.9.2026
 
@@ -166,41 +136,42 @@ day this code ran where it is meant to run. Each line is a thing that was on NOT
   needed**: the brief's worry about `snap_spans` did not survive measurement (on a synthetic 60 s take
   with 150 words: read 0.03 s, snap 0.11 s, plan 0.00 s, write 0.04 s, render 5.7 s).
 
+## FAILED ON THE WAY
+
+- **Two transforms at once overwrote each other's clone** (Part 1 of the brief). Found after v3.2 was
+  delivered; the test was red on v3.2 every run; fixed as above.
+- **v3.2 left its temporary folder behind, for ever.** Seen in the upgrade test, not by reading.
+- **The installer created the key file at mode 644.** Measured in the upgrade test on v3.2's
+  installer; the file holds credentials. 600 now, on creation only; an existing file is never touched.
+- **The English ears translate Croatian.** Not a fault of this app, and it cannot see it: see MEASURED
+  ON THE MAC. A Croatian take gives an English sentence in the clone's voice, on the take's timing.
+- **Homebrew's ffmpeg 9.0.1 has no rubberband filter.** The fallback to atempo works and is reported;
+  formants are not kept. The `rubberband` command, 4.0.0, is installed separately and unused.
+- **The old updater could mix two versions for five minutes after a push** (known at v3.2). Closed.
+
 ## NOT TESTED
 
-- **Nothing ran on a Mac.** Not the installer, the launcher, Homebrew's ffmpeg or its rubberband, Chrome
-  on macOS, or the file chooser there. *11.9.2026: the installer, the updater, the server and ffmpeg
-  now have (see MEASURED ON THE MAC). Still not: the launcher's panel and keys, Chrome, the file chooser.*
-- **The real models were never called.** `/hear` and `/say` were a stand-in in their exact response
-  shapes. Unexercised: Whisper's actual word times on his voice, a real clone's line and its tokens,
-  and whether the clone's word count matches his on real speech (the route refuses when it does not;
-  how often that happens is unknown). *11.9.2026: called, on one English line and six Croatian ones;
-  the count matched on all seven. Four more English lines wait on Baba's microphone.*
-- **How the transform sounds.** The 7.5 ms is where sound lands on tone bursts, not whether a stretched
-  vowel of a real voice smears. That is question three of the brief, and it is his.
-- **Croatian.** MANTRA_VOICE's ears are fixed to English; a Croatian take was not tried. *11.9.2026:
-  tried, see above: the ears translate and the transform cannot tell. Moved.*
-- **MANTRA_VOICE under its LaunchAgent after a pull** — *measured 11.9.2026, see above* — and its own
-  Voices page after the change.
-- **Long takes.** The longest take transformed was 3 seconds with 4 words. The edge snapping reads
-  samples in pure Python; a 60-second take has not been timed. *11.9.2026: timed, see above. Moved.*
-- **Two transforms of one cell at once**, from two tabs. Both write the same `gen/` file through a
-  temporary file and a rename, so the last one wins; not exercised. *11.9.2026: two DIFFERENT cells
-  at once is now a test, and it found the clone folder shared (see FAILED ON THE WAY). The same cell
-  twice is covered by `write_wav`'s own temporary name per writer, still not driven from two tabs.*
+- **Four of the five English lines** of brief 2.5 and 2.6, and the microphone path on this Mac: only
+  one English take of Baba's existed on the Mac. The count of tokens against words matched on all
+  seven lines tried (one English, six Croatian).
+- **How the transform sounds**, against picture: Baba's ears, `~/Desktop/transform-listening/`.
+- **The page in Chrome on macOS**: the badge colours, Transform this take, the report, Add a voice…
+  with the file picker, the dimmed button, ⤓ Download's file name in Downloads. The routes behind
+  every one of them ran; the clicks did not.
+- **The updater's own Test 4**: push a trivial change and update within a minute. Needs a push to
+  `main`, which needs Baba's yes; the resolve-and-fetch path ran for real against the current `main`.
+- **The launcher's panel and its keys** (o, f, l, r, u, q): the server was started the launcher's way,
+  the panel was not driven.
+- **The soak and the monkey**; cold start, memory and battery.
 
 ## KNOWN
 
-- **Rolling back to v3.1 removes the PRIVATE warning** from the download names of takes made with private
-  voices. The takes and their notes are untouched; going forward to v3.2 restores the names. v3.1 cannot
-  be taught a warning it does not have.
-- **`sampleplayer-update` from a second terminal** leaves the panel's old server running until q is
-  pressed. The page says so; the updater does not stop it.
-- **For five minutes after a push, `update.sh` can install a mixture of two versions.** GitHub's raw
-  files are cached for 300 seconds, per file, and the updater fetches its three files separately.
-  Measured at this delivery: server and page arrived as v3.2 while the installer arrived as v3.1 and
-  the updater announced "v3.1". Here the installers differed only in that word; a release where they
-  differ in substance would install half of each. Fetching by commit rather than by `main` would close
-  it, and is a change to the updater, so it is not in this release. Run on a fresh home five minutes
-  later: "all three arrived intact — v3.2", server and page matching the build byte for byte.
-- **6,599 bytes of the source budget remain.**
+- **Rolling back to v3.1 removes the PRIVATE warning** from download names (v3.1 cannot be taught it).
+  Rolling back to v3.2 keeps it, measured.
+- **`sampleplayer-update` from a second terminal** leaves the panel's old server running until q.
+- **For five minutes after a push the `sampleplayer-update` command may run the previous `update.sh`**
+  (it fetches that one file from `main`); the three files it installs still come from one commit.
+- **On this Mac every transform uses atempo**, until an ffmpeg with rubberband is installed.
+- **The six Croatian takes** put into cells 1 to 6 of project-01 for the measurement are Baba's to
+  keep or delete.
+- **8,561 bytes of the source budget remain.**
