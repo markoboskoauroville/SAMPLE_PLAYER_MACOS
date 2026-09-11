@@ -458,3 +458,7 @@ Each session adds a line: date, what was ticked, commits, what is blocking.
                a week, shrink only if a compute charge appears, never a second machine. The usage
                API answered from the Mac: this month Compute, Block Storage, Network, Telemetry all
                0.0 EUR (the tenancy bills in EUR, so the alarm is one euro). 4.6 added for the check.
+               The alarm made from the Mac through the Budgets API (the CLI is `oci budgets budget
+               budget`, one level deeper than its name): budget "one-euro-alarm", 1 EUR a month on
+               the whole tenancy, two alert rules at 100 %, ACTUAL and FORECAST, emailed to Baba's
+               auroville address, all ACTIVE. Console: Billing & Cost Management > Budgets.
