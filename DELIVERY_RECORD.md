@@ -140,6 +140,25 @@ day this code ran where it is meant to run. Each line is a thing that was on NOT
   cut and no `consent` (what its own Voices page sends) answered 200 and listed the voice with no
   note; Sample Player's `/api/clones` showed it as `no consent recorded`, release false. Removed with
   `/remove`; the eight voices are as they were. The page itself was not clicked; its request was sent.
+- **The real models on one English line of Baba's** (cell 00, recorded on the 30.8.2026 build, 4.52 s,
+  "There's everything they do. His answer is simple."), clone `marko` (his own voice), model qwen06:
+  `/hear?words=1` 1.4 s then 1.0 s (the ears do not cache; the first call of the day was 6.2 s while
+  the ears warmed); 8 words heard. `/say` engine clone: **8 tokens for 8 words**, 37.6 s the first
+  time, 0.0 s cached. The transform: 1.6 s with the clone cached; report ok 1, smear 0, **chirp 7**,
+  worst 2.18x, atempo; output 4.523 s, exactly the take. The clone's clip was 5.44 s for a 4.52 s take,
+  and the clone's words were longer than his, so nearly every word was squeezed. `snap_spans` on the
+  output against the plan: **worst edge 40 ms** on real speech (7.5 ms on tone bursts). Four more
+  English lines are needed for 2.5 and 2.6; they are Baba's to record.
+- **Croatian through the English ears, measured, and it is worse than "no alignment".** Five sentences
+  cut from Baba's own Croatian recording (`~/Music/VOICES_CLONING/MARKO.wav`, a Patanjali scene) and
+  a 60-second stretch of it were put in cells 1 to 6. `/hear?words=1` **translated** them: "Teacher,
+  I'm leaving tomorrow at dawn." for *Učitelju, sutra u zoru odlazim*, with a start and end for every
+  English word. Whisper medium with detection on says `hr` or `bs` for all six and `en` for cell 00.
+  The transform then runs to the end and reports success: the clone says the English translation,
+  tokens match words on all six (6/6, 6/6, 9/9, 14/14, 6/6, 142/142), and the result is an English
+  sentence in the clone's voice squeezed onto Croatian timing, chirp on 26 of 41 words across the five
+  short lines, worst 8.2x. Nothing in the route can tell. Those six cells are left as they are for
+  Baba to hear or delete.
 - **A 60-second take through the transform.** 142 words heard in 6.1 s (4.7 s the second time; the
   ears do not cache); the clone said them in 17.6 s the first time and 0.0 s cached; the transform
   route, with the clone cached, took 9.7 s, of which the edge snapping in pure Python was 0.1 s and
@@ -155,10 +174,12 @@ day this code ran where it is meant to run. Each line is a thing that was on NOT
 - **The real models were never called.** `/hear` and `/say` were a stand-in in their exact response
   shapes. Unexercised: Whisper's actual word times on his voice, a real clone's line and its tokens,
   and whether the clone's word count matches his on real speech (the route refuses when it does not;
-  how often that happens is unknown).
+  how often that happens is unknown). *11.9.2026: called, on one English line and six Croatian ones;
+  the count matched on all seven. Four more English lines wait on Baba's microphone.*
 - **How the transform sounds.** The 7.5 ms is where sound lands on tone bursts, not whether a stretched
   vowel of a real voice smears. That is question three of the brief, and it is his.
-- **Croatian.** MANTRA_VOICE's ears are fixed to English; a Croatian take was not tried.
+- **Croatian.** MANTRA_VOICE's ears are fixed to English; a Croatian take was not tried. *11.9.2026:
+  tried, see above: the ears translate and the transform cannot tell. Moved.*
 - **MANTRA_VOICE under its LaunchAgent after a pull** — *measured 11.9.2026, see above* — and its own
   Voices page after the change.
 - **Long takes.** The longest take transformed was 3 seconds with 4 words. The edge snapping reads

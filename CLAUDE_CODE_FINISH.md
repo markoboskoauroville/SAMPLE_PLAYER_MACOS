@@ -383,3 +383,10 @@ Each session adds a line: date, what was ticked, commits, what is blocking.
                     9.7 s with the clone cached, snap_spans 0.1 s. Nothing to speed up; the premise
                     was wrong and is recorded as measured. 2.10 /add without a note (the Voices
                     page's request): 200, red in Sample Player, removed again.
+               2.5  partly: ONE English line of Baba's existed (cell 00); 8 words = 8 tokens, hear
+               2.6  1.0 s, say 37.6 s first / 0.0 cached, transform 1.6 s, chirp 7 of 8, worst
+                    edge 40 ms on real speech. His recording in ~/Music/VOICES_CLONING is CROATIAN
+                    (Whisper detects hr/bs); the English ears translated five of its sentences and
+                    the transform ran to the end on the translation, tokens matching 6/6 times.
+                    Cells 1 to 6 of project-01 hold those Croatian takes now. Four English lines
+                    are still his to record, so 2.5, 2.6 and 2.8 stay open; 2.11 has its numbers.
