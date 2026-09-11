@@ -966,6 +966,8 @@ def state():
             # returns, and the cell page says which so nobody has to open the file to find out.
             "rate": rate,
             "generated": gens,
+            "transform": ({"engine": engine_for(meta["transform_voice"]), "voice": meta["transform_voice"], "usage": meta.get("transform_usage") or "none",
+                           "report": meta.get("transform_report", "")} if meta.get("transform_voice") else None),
             "waveform": wf,
         })
     return jsonify({"project": pid, "cells": cells})

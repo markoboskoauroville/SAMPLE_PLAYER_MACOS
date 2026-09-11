@@ -49,6 +49,22 @@ h2{font-size:14px;font-weight:normal;margin:0 0 8px}
 .closebar{display:flex;justify-content:center;margin:0 0 10px;
            position:sticky;top:0;background:#000;padding:8px 0;z-index:2}
 .closebar button{min-width:120px}
+/*
+  THE CONSENT BADGE. Colour is the state channel, so the badge is a colour and a word: green, cleared
+  for release; amber, held back for experiments; red, no note of who gave the voice, which is the
+  one real fault on this page. The chosen voice is shown by shape (a filled radio), not colour, so
+  a chosen private voice is still amber and still reads as private.
+*/
+.badge-public{color:#4ade80}.badge-private{color:var(--amber)}.badge-none{color:var(--red)}
+.clones{display:flex;flex-wrap:wrap;gap:6px;min-height:40px;align-content:flex-start;margin-top:4px}
+.clones button{text-align:left}
+.clones .off{color:var(--dim)}
+#tfreport{min-height:56px;margin-top:6px;font-size:12px;color:var(--label);white-space:pre-wrap}
+#tfreport .warn{color:var(--amber)}
+.form label{display:block;color:var(--label);margin-top:10px}
+.form input[type=text],.form input[type=number],.form input[type=date]{background:#000;border:1px solid #52525b;
+  color:#fff;font:inherit;padding:6px;width:100%}
+#vfmissing{min-height:16px;margin-top:8px;color:var(--label)}
 .help{color:var(--dim);font-size:10px;margin-top:24px}
 .help b{color:#cbd5e1;font-weight:normal;display:block;margin-top:8px}
 .chip{display:inline-block;border:1px solid var(--edge);padding:4px 7px;margin:0 4px 4px 0;
@@ -717,16 +733,30 @@ async function openCell(i){
      <div class="row" style="margin-top:6px">
        <button style="flex:2;background:var(--amber);color:#000"
                onclick="performText(${i})">Perform this text</button>
-       <button style="flex:1" onclick="renderDownload('${c.voice || ""}','${c.voiceId ? c.voiceId.split("/")[1] : ""}','',this,${i})">⤓ Download</button>
+       <button style="flex:1" onclick="renderDownload('${c.voice && !c.voice.startsWith("transform-") ? c.voice : ""}','${c.voiceId ? c.voiceId.split("/")[1] : ""}','',this,${i})">⤓ Download</button>
        <button style="flex:1" onclick="transcribe(${i})">Transcribe</button>
        <button style="flex:1" onclick="readText(${i})">Open a file</button></div>
      <div style="color:var(--dim);font-size:10px;margin-top:10px">
-       ${(() => { const v = voiceFor(c); return v
+       ${(() => { if (c.transform && c.voice === c.transform.engine)
+                    return "voice: " + escapeHtml(c.transform.voice) + ", your own performance (" + badgeWord(c.transform.usage) + ")";
+                  const v = voiceFor(c); return v
          ? "voice: " + escapeHtml(v.name) + (c.voice ? " (this cell's)" : " (the last one you used)")
          : "no voice chosen yet"; })()}</div>
      <div class="row" style="margin-top:4px">
        <button style="flex:1" onclick="chooser(${i},'speechify')">Speechify</button>
        <button style="flex:1" onclick="chooser(${i},'hume')">Hume</button></div>
+
+     <!--
+       MY PERFORMANCE, ANOTHER VOICE. Always drawn, dimmed until it can be used: the voices are
+       asked of MANTRA_VOICE after the page is up, and they fill a box that is already the size
+       they will take, so nothing below them moves when they arrive.
+     -->
+     <div style="color:var(--dim);font-size:10px;margin-top:12px">my performance, a cloned voice — free, on this Mac</div>
+     <div id="clones" class="clones"><span class="off">asking MANTRA_VOICE for the voices…</span></div>
+     <div class="row" style="margin-top:6px">
+       <button id="tfbtn" style="flex:2" disabled onclick="transformCell(${i})">Transform this take</button>
+       <button style="flex:1" onclick="voiceForm(${i}, '')">Add a voice…</button></div>
+     <div id="tfreport">${c.transform ? transformLine(c.transform) : ""}</div>
      <div class="row" style="margin-top:6px">
        <button style="flex:2" onclick="download(${i})">⤓ Download this audio</button>
        <button style="flex:1" onclick="revert(${i})">My own recording</button></div>
@@ -753,6 +783,17 @@ async function openCell(i){
      <b>The text box</b>Whatever is in it is this cell's line. Type it, paste it, transcribe the
      recording into it, or open a file into it — then correct it by hand if a word came back
      wrong. Everything writes into the same box, and Perform reads whatever is there.
+     <b>Transform this take</b>Keeps your recording's timing, pauses and emphasis and gives it the
+     timbre of the cloned voice chosen above. Each of the clone's words is laid onto yours. Where a
+     word has to be stretched past 1.3 times it smears, and below 0.75 it chirps; the report under
+     the button names those words, so you know which ones to listen to. Your recording is never
+     replaced, and "My own recording" goes back to it.
+     <b>The colour beside a voice</b>Green: cleared for release. Amber: private, for experiments,
+     and a take made with it downloads with PRIVATE in its file name. Red: nobody has written down who
+     gave this voice. Choose it and the report offers to record the note.
+     <b>Add a voice…</b>Picks a recording, cuts twelve seconds of it, and adds it to MANTRA_VOICE with
+     a note of who gave it, when, what for, and whether it may go public. It cannot be added without
+     the note.
      <b>Perform this text</b>Speaks the box in the cell's chosen voice and stores it beside your
      recording. If no voice is chosen yet it asks for one first. Your take is never replaced.
      <b>⤓ Download</b>Renders the box in the cell's voice and saves it straight to disk without
@@ -789,8 +830,192 @@ async function openCell(i){
   cv.onclick = e => setPoint(e, true);
   cv.oncontextmenu = e => { e.preventDefault(); setPoint(e, false); };
   paintBig();
+  loadClones(i);
 }
 window.openCell = openCell;
+
+// ─────────────────────────────────────────────────────────── voice transform ──
+
+function badgeWord(usage){
+  return {public: "public", private: "private, for experiments", none: "no consent recorded"}[usage] || "no consent recorded";
+}
+
+function transformLine(t){
+  return escapeHtml("last transform: " + t.voice + " — " + (t.report || "")) + (t.usage === "public" ? "" :
+    `\n<span class="warn">not for release: its download is named PRIVATE</span>`);
+}
+
+async function loadClones(i){
+  const box = $("#clones");
+  if (!box) return;
+  let d;
+  try { d = await (await api("/api/clones")).json(); }
+  catch (e) { d = {ok: false, why: "the server did not answer"}; }
+  if (!$("#clones")) return;                 // the page moved on while MANTRA_VOICE was asked
+  S.clones = d.ok ? d.voices : [];
+  if (!d.ok){
+    box.innerHTML = `<span class="off">${escapeHtml(d.why)}</span>`;
+  } else if (!S.clones.length){
+    box.innerHTML = `<span class="off">no cloned voices yet — add one</span>`;
+  } else {
+    if (!S.clones.some(v => v.name === S.clone)) S.clone = null;
+    box.innerHTML = S.clones.map(v => {
+      const on = v.name === S.clone;
+      return `<button onclick="pickClone(${i}, '${escapeHtml(v.name).replace(/'/g, "")}')">${on ? "◉" : "○"} ${escapeHtml(v.name)}
+        <span class="badge-${v.badge.usage}">${escapeHtml(v.badge.label)}</span></button>`;
+    }).join("");
+  }
+  const btn = $("#tfbtn");
+  if (btn) btn.disabled = !(S.clone && S.cells[i].hasOriginal && d.ffmpeg);
+}
+window.loadClones = loadClones;
+
+function pickClone(i, name){
+  S.clone = name;
+  loadClones(i);
+  const v = (S.clones || []).find(x => x.name === name);
+  const r = $("#tfreport");
+  if (!r || !v) return;
+  if (v.badge.usage === "none"){
+    r.innerHTML = `${escapeHtml(name)} has no note of who gave it. A take made with it is treated as not for release.
+      <button style="margin-left:8px" onclick="voiceForm(${i}, '${escapeHtml(name).replace(/'/g, "")}')">Record the note</button>`;
+  } else if (v.badge.usage === "private"){
+    r.innerHTML = `<span class="warn">${escapeHtml(name + " is private: " + v.consent.what_for + " (" + v.consent.who +
+      ", " + v.consent.when + "). Anything made with it downloads with PRIVATE in its file name.")}</span>`;
+  } else {
+    r.textContent = name + " is cleared for release: " + v.consent.what_for + " (" + v.consent.who + ", " + v.consent.when + ").";
+  }
+}
+window.pickClone = pickClone;
+
+async function transformCell(i){
+  if (!S.clone) return stage("choose a cloned voice first");
+  const d = await busy("listening, speaking in " + S.clone + ", laying it on your timing…", async () =>
+    (await api("/api/transform/" + i, {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({voice: S.clone})})).json());
+  if (!d.ok) return stage(d.why);
+  const r = d.report, c = r.counts, total = c.ok + c.smear + c.chirp;
+  const risky = r.segments.filter(s => s.verdict !== "ok")
+    .map(s => `"${s.words}" at ${s.at.toFixed(2)} s, ${s.verdict}, ${s.ratio}x`).join("; ");
+  stage(total + " words, " + c.ok + " clean" + (risky ? ", listen to: " + risky : ""));
+  await refresh();
+  openCell(i);
+  const box = $("#tfreport");
+  if (box) box.innerHTML = escapeHtml(total + " words: " + c.ok + " clean, " + c.smear + " smear, " + c.chirp + " chirp. " +
+    "Worst stretch " + r.worst + "x, " + r.filter + "." + (risky ? "\nListen to: " + risky : "")) +
+    (r.badge.release ? "" : `\n<span class="warn">${escapeHtml(S.clone + " is " + r.badge.label +
+      ": the download of this take is named PRIVATE, not for release.")}</span>`);
+}
+window.transformCell = transformCell;
+
+/*
+  ADD A VOICE, OR WRITE THE NOTE FOR ONE THAT HAS NONE. One level down from the cell, because a form
+  in the middle of the cell page is a hole in it. The whole form is drawn at once; the button is
+  dimmed until the note is complete, and the line under it says what is still missing.
+*/
+function voiceForm(i, existing){
+  const today = new Date().toISOString().slice(0, 10);
+  S.vf = {i, existing, file: null, usage: ""};
+  screen(existing ? "The note for " + escapeHtml(existing) : "Add a voice",
+    `<div class="row" style="margin-bottom:8px"><button style="flex:1" onclick="openCell(${i})">‹ back to cell ${i + 1}</button></div>
+     <div class="form">
+       <div style="${existing ? "opacity:.4;pointer-events:none" : ""}">
+         <button onclick="pickVoiceFile()">choose a recording …</button>
+         <div id="vffile" style="min-height:16px;margin-top:6px;color:var(--label)">${existing ? "the voice is already cut" : "no recording chosen"}</div>
+         <audio id="vfpreview" controls style="width:100%;height:32px;margin-top:4px;color-scheme:dark"></audio>
+         <label>name of the voice</label><input type="text" id="vfname" value="${escapeHtml(existing)}" oninput="voiceFormCheck()">
+         <div class="row"><div style="flex:1"><label>start, seconds</label><input type="number" id="vfstart" value="0" min="0" step="0.1"></div>
+           <div style="flex:1"><label>length, seconds</label><input type="number" id="vflength" value="12" min="3" max="30" step="0.1"></div></div>
+       </div>
+       <label>who gave this voice</label><input type="text" id="vfwho" oninput="voiceFormCheck()">
+       <label>what they gave it for</label><input type="text" id="vffor" oninput="voiceFormCheck()">
+       <label>when they gave permission</label><input type="date" id="vfwhen" value="${today}" max="${today}">
+       <label>where anything made with it may go</label>
+       <div class="row" style="margin-top:4px">
+         <button id="vfpublic" style="flex:1" onclick="setUsage('public')">○ public — cleared for release</button>
+         <button id="vfprivate" style="flex:1" onclick="setUsage('private')">○ private — experiments only</button></div>
+       <div id="vfmissing"></div>
+       <div class="row" style="margin-top:8px"><button id="vfgo" style="flex:1" disabled onclick="submitVoice()">${existing ? "Save the note" : "Add the voice"}</button></div>
+     </div>`,
+    `<b>Why the note</b>A cloned voice nobody remembers the permission for is the one that causes trouble
+     in two years. It is written into MANTRA_VOICE's meta.json beside the reference, so every app on this
+     Mac that lists voices sees it.
+     <b>public or private</b>There is no default. Public means a take made with it may go into something
+     people will see. Private means experiments: its takes download with PRIVATE in their file names.
+     <b>start and length</b>Twelve seconds of one person speaking, whole sentences, no music. The words
+     are written down by the ears on this Mac.`);
+  voiceFormCheck();
+}
+window.voiceForm = voiceForm;
+
+function pickVoiceFile(){
+  const f = document.createElement("input");
+  f.type = "file"; f.accept = "audio/*,.wav,.mp3,.m4a,.aiff,.flac,.ogg";
+  f.onchange = () => {
+    const file = f.files[0];
+    if (!file) return;
+    if (!/^audio\//.test(file.type) && !/\.(wav|mp3|m4a|aiff?|flac|ogg)$/i.test(file.name)){
+      $("#vffile").textContent = file.name + " is not a recording this can cut";
+      S.vf.file = null; return voiceFormCheck();
+    }
+    S.vf.file = file;
+    $("#vffile").textContent = file.name + ", " + (file.size / 1048576).toFixed(1) + " MB";
+    $("#vfpreview").src = URL.createObjectURL(file);
+    const nm = $("#vfname");
+    if (!nm.value.trim()) nm.value = file.name.replace(/\.[^.]+$/, "").replace(/[^A-Za-z0-9_-]+/g, "_").slice(0, 40);
+    voiceFormCheck();
+  };
+  f.click();
+}
+window.pickVoiceFile = pickVoiceFile;
+
+function setUsage(u){
+  S.vf.usage = u;
+  // The chosen word takes its badge colour, so the choice is read at a glance and not only by a dot.
+  $("#vfpublic").textContent = (u === "public" ? "◉" : "○") + " public — cleared for release";
+  $("#vfprivate").textContent = (u === "private" ? "◉" : "○") + " private — experiments only";
+  $("#vfpublic").className = u === "public" ? "badge-public" : "";
+  $("#vfprivate").className = u === "private" ? "badge-private" : "";
+  voiceFormCheck();
+}
+window.setUsage = setUsage;
+
+function voiceFormCheck(){
+  const v = S.vf; if (!v) return;
+  const missing = [];
+  if (!v.existing && !v.file) missing.push("a recording");
+  if (!v.existing && !$("#vfname").value.trim()) missing.push("a name");
+  if (!$("#vfwho").value.trim()) missing.push("who gave it");
+  if (!$("#vffor").value.trim()) missing.push("what for");
+  if (!v.usage) missing.push("public or private");
+  $("#vfmissing").textContent = missing.length ? "still needed: " + missing.join(", ") : "";
+  $("#vfgo").disabled = missing.length > 0;
+}
+window.voiceFormCheck = voiceFormCheck;
+
+async function submitVoice(){
+  const v = S.vf;
+  const note = {who: $("#vfwho").value, what_for: $("#vffor").value, when: $("#vfwhen").value, usage: v.usage};
+  let d;
+  if (v.existing){
+    d = await busy("writing the note…", async () => (await api("/api/clones/consent", {method: "POST",
+      headers: {"Content-Type": "application/json"}, body: JSON.stringify(Object.assign({name: v.existing}, note))})).json());
+  } else {
+    const form = new FormData();
+    form.append("file", v.file);
+    form.append("name", $("#vfname").value);
+    form.append("start", $("#vfstart").value);
+    form.append("length", $("#vflength").value);
+    for (const k in note) form.append(k, note[k]);
+    d = await busy("cutting the voice and writing down its words…", async () =>
+      (await api("/api/clones/add", {method: "POST", body: form})).json());
+  }
+  if (!d.ok) return stage(d.why);
+  S.clone = v.existing || d.name;
+  stage((v.existing ? "note saved for " : "added ") + S.clone + ", " + v.usage);
+  openCell(v.i);
+}
+window.submitVoice = submitVoice;
 
 function setPoint(e, isIn){
   const c = S.cells[ed.i];
