@@ -98,7 +98,7 @@ NOT TESTED as it moves.
   **Prove the running process is new**, not the file: `curl -s -X POST 127.0.0.1:8837/consent -d '{}'`
   must answer 400 `name the voice`; an old voiced answers a 404 page.
 
-- [ ] **2.2 The existing voices, and their notes.** `curl -s 127.0.0.1:8837/voices` and list every name.
+- [x] **2.2 The existing voices, and their notes.** `curl -s 127.0.0.1:8837/voices` and list every name.
   Each one without a `consent` is red in Sample Player. **Do not write any note yourself.** Ask Baba,
   one voice at a time: who gave it, what for, public or private. Then
   `python3 ~/Developer/MANTRA_VOICE/clone.py consent <name> --who "…" --for "…" --usage public|private`.
@@ -151,14 +151,14 @@ NOT TESTED as it moves.
   change to MANTRA_VOICE (`/hear?lang=hr`, or detection) with its own tests, and Parakeet v3 (Part 5.3)
   is the candidate ear.
 
-- [ ] **2.12 Close the part.** Update `HANDOFF.md`'s "never been proven" paragraph in place, commit
+- [x] **2.12 Close the part.** Update `HANDOFF.md`'s "never been proven" paragraph in place, commit
   `DELIVERY_RECORD.md`, and push only after asking Baba.
 
 ---
 
 ## PART 3 — THE TWO KNOWN GAPS FROM THE DELIVERY
 
-- [ ] **3.1 The updater fetches one commit, not three files from `main`.** Resolve `main` to a commit
+- [x] **3.1 The updater fetches one commit, not three files from `main`.** Resolve `main` to a commit
   once (`https://api.github.com/repos/markoboskoauroville/SAMPLE_PLAYER_MACOS/commits/main`, no key
   needed, read `sha`), then fetch the three files from `raw.githubusercontent.com/…/<sha>/…`. A commit's
   files never change, so the cache cannot mix versions. Keep every existing refusal (size, shebang,
@@ -170,7 +170,7 @@ NOT TESTED as it moves.
   Part 1 will use some). Find what can go without losing a protection — long comments that repeat
   `DEVELOPMENT.md` are the likeliest — and record what was removed and why.
 
-- [ ] **3.3 Release v3.3** with Parts 1, 2.7 and 3.1: the delivery gate in full, `DELIVERY_RECORD.md`
+- [x] **3.3 Release v3.3** with Parts 1, 2.7 and 3.1: the delivery gate in full, `DELIVERY_RECORD.md`
   rewritten, the upgrade from v3.2 **and** the rollback to v3.2 run for real, as v3.2's were. Ask Baba
   before pushing to `main`.
 
@@ -428,3 +428,14 @@ Each session adds a line: date, what was ticked, commits, what is blocking.
                     stays inside the free 3,000 and 18,000 and costs $0; without that allowance it
                     would be $56.54 a month at most. Recommendation and the question are in the
                     session's report to Baba; nothing is resized.
+    11.9.2026  Baba's answers, first round. 2.2: all eight voices private, "private experiments
+               only", the givers in his words (marko, voice1: himself; voice: Manan Periwal, parent
+               not yet confirmed; the other five: no permission recorded, taken from recordings);
+               written, read back, all eight amber in Sample Player. 3.3: Baba's yes after the
+               proof (tests and gates on the clean tree, the record, the upgrade and rollback run
+               again); pushed, main at d633bdb then 72694e8. 3.1 Test 4 run for real: one second
+               after a push the update still installed the previous commit's three files, all from
+               that one commit; after GitHub's 60 s cache the new commit's, the installer's byte
+               count proving it. 2.12 closed: HANDOFF corrected, the record pushed. ABLETON_TEACHER
+               pushed too (9e2346e). Still open in Part 2: 2.5, 2.6, 2.8, 2.9, 2.11 (his hands and
+               ears); Part 4 waits on his network answer and the Oracle decision.

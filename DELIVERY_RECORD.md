@@ -136,6 +136,18 @@ day this code ran where it is meant to run. Each line is a thing that was on NOT
   needed**: the brief's worry about `snap_spans` did not survive measurement (on a synthetic 60 s take
   with 150 words: read 0.03 s, snap 0.11 s, plan 0.00 s, write 0.04 s, render 5.7 s).
 
+- **The updater's own Test 4, run for real after the push.** v3.3 pushed as d633bdb; `sampleplayer-update`
+  installed it ("commit d633bdb", server and page byte-identical to it). A trivial change to the
+  installer pushed as 72694e8 at 17:50:59; an update one second later still resolved d633bdb (GitHub's
+  API answer is cached 60 s) and installed **all three files from d633bdb**, no mixture; an update at
+  17:52:30 resolved 72694e8 and the installer arrived at 17,694 bytes, 72694e8's size (d633bdb's is
+  17,577). Three files, one commit, every time.
+- **The eight voices have their notes**, written 11.9.2026 in Baba's words through `clone.py consent`:
+  all private, "private experiments only"; marko and voice1 given by "Marko Bosko, myself"; voice by
+  "Manan Periwal; his parent has not yet confirmed permission for a clone"; gwyneth, snoop, rowan,
+  actress1 and old_actor "no permission is recorded; taken from a recording". `/api/clones` shows all
+  eight amber, "private, for experiments".
+
 ## FAILED ON THE WAY
 
 - **Two transforms at once overwrote each other's clone** (Part 1 of the brief). Found after v3.2 was
@@ -158,8 +170,6 @@ day this code ran where it is meant to run. Each line is a thing that was on NOT
 - **The page in Chrome on macOS**: the badge colours, Transform this take, the report, Add a voice…
   with the file picker, the dimmed button, ⤓ Download's file name in Downloads. The routes behind
   every one of them ran; the clicks did not.
-- **The updater's own Test 4**: push a trivial change and update within a minute. Needs a push to
-  `main`, which needs Baba's yes; the resolve-and-fetch path ran for real against the current `main`.
 - **The launcher's panel and its keys** (o, f, l, r, u, q): the server was started the launcher's way,
   the panel was not driven.
 - **The soak and the monkey**; cold start, memory and battery.
@@ -172,6 +182,8 @@ day this code ran where it is meant to run. Each line is a thing that was on NOT
 - **For five minutes after a push the `sampleplayer-update` command may run the previous `update.sh`**
   (it fetches that one file from `main`); the three files it installs still come from one commit.
 - **On this Mac every transform uses atempo**, until an ffmpeg with rubberband is installed.
+- **`/api/version` can say "latest v3.2" for five minutes after a release**: it reads the published
+  installer from `raw/main`, which is cached 300 s. Seen at 17:51 on 11.9.2026 with v3.3 installed.
 - **The six Croatian takes** put into cells 1 to 6 of project-01 for the measurement are Baba's to
   keep or delete.
 - **8,561 bytes of the source budget remain.**
