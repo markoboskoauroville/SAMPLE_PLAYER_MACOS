@@ -93,7 +93,7 @@ The delivery record's NOT TESTED list is this part's list. Write every result in
 `DELIVERY_RECORD.md` headed **MEASURED ON THE MAC, <date>**, with the numbers, and remove each item from
 NOT TESTED as it moves.
 
-- [ ] **2.1 MANTRA_VOICE runs the new code.** Pull, then restart it through its LaunchAgent:
+- [x] **2.1 MANTRA_VOICE runs the new code.** Pull, then restart it through its LaunchAgent:
   `launchctl kickstart -k gui/$(id -u)/com.mantra.voiced` (or Voices off and on in the star menu).
   **Prove the running process is new**, not the file: `curl -s -X POST 127.0.0.1:8837/consent -d '{}'`
   must answer 400 `name the voice`; an old voiced answers a 404 page.
@@ -103,12 +103,12 @@ NOT TESTED as it moves.
   one voice at a time: who gave it, what for, public or private. Then
   `python3 ~/Developer/MANTRA_VOICE/clone.py consent <name> --who "…" --for "…" --usage public|private`.
 
-- [ ] **2.3 Sample Player v3.2 installed and running.** `sampleplayer-update` (or `u` in the panel).
+- [x] **2.3 Sample Player v3.2 installed and running.** `sampleplayer-update` (or `u` in the panel).
   Then `curl -s 127.0.0.1:$(cat ~/.sampleplayer-web/port.txt)/api/version` says `v3.2`, and
   `/api/clones` answers JSON. **If it says v3.1, wait five minutes and run the update again**: GitHub's
   raw files are cached for 300 seconds each and the updater can fetch a mixture (measured 11.9.2026).
 
-- [ ] **2.4 Homebrew's ffmpeg has rubberband.** `ffmpeg -hide_banner -filters | grep rubberband`. Without
+- [x] **2.4 Homebrew's ffmpeg has rubberband.** `ffmpeg -hide_banner -filters | grep rubberband`. Without
   it the transform falls back to atempo, which does not keep formants; tell Baba which it is.
 
 - [ ] **2.5 The real models, measured.** Record five English lines of Baba's in cells (ask him to; the
@@ -372,3 +372,10 @@ Each session adds a line: date, what was ticked, commits, what is blocking.
                     Source 254,009 bytes: 5,991 remain of 260,000. Written into DEVELOPMENT.md and
                     DELIVERY_RECORD.md. Noticed on the way: the renderer test says "atempo" on this
                     Mac's ffmpeg 9.0.1, so Homebrew's build has no rubberband (2.4 will confirm).
+               2.1  voiced kickstarted, up in 1 s; /consent {} answered a 404 page before and
+                    400 "name the voice" after. 2.3 sampleplayer-update over a 30.8.2026 build:
+                    v3.2, files byte-identical to 4bba925, server on 8084, /api/version v3.2,
+                    /api/clones JSON. 2.4 NO rubberband in Homebrew's ffmpeg 9.0.1_1 (the formula
+                    no longer depends on it); the rubberband 4.0.0 command is installed separately.
+                    The transform uses atempo on this Mac. All in DELIVERY_RECORD.md, MEASURED ON
+                    THE MAC. 2.2 waits on Baba: eight voices, none with a note.

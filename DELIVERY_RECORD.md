@@ -115,10 +115,33 @@ Chromium, says to press q and start again.
   per transform and `mkstemp` in `write_wav`; a new gate refuses a fixed temporary name. Tests 137,
   gates 56.
 
+## MEASURED ON THE MAC, 11.9.2026
+
+By Claude Code on Baba's Mac (M-series, macOS 15, Python 3.10.14, Homebrew ffmpeg 9.0.1_1), the first
+day this code ran where it is meant to run. Each line is a thing that was on NOT TESTED below.
+
+- **MANTRA_VOICE under its LaunchAgent after a pull.** `git pull` to 8fc0373, then `launchctl kickstart
+  -k gui/501/com.mantra.voiced`: up again in 1 s. Before the restart `POST /consent {}` answered a 404
+  page (the old process); after it, `400 {"error":"name the voice"}`. The running process is the new one.
+- **The installer and the updater, on a Mac.** `sampleplayer-update` over a 30.8.2026 build: all three
+  files arrived intact as v3.2, Flask installed into the existing venv, the key file left alone. The
+  installed `server.py` and `static/index.html` are byte-identical to commit 4bba925; the launcher says
+  edition v3.2. The server started the launcher's way took port 8084; `/api/version` answers
+  `{"installed":"v3.2","latest":"v3.2","behind":false}` and `/api/clones` answers JSON with eight voices.
+- **Homebrew's ffmpeg has NO rubberband.** `ffmpeg -filters | grep rubberband` finds nothing and the
+  build configuration has no `--enable-librubberband`; Homebrew's ffmpeg 9.0.1 formula no longer
+  depends on rubberband (its dependency list has eleven entries and rubberband is not one). The
+  `rubberband` command itself, version 4.0.0, is installed at `/opt/homebrew/bin/rubberband`. So on
+  this Mac every transform falls back to **atempo**, which does not keep formants, and the report
+  says so. The renderer test measured 7.5 ms worst edge with atempo, the same as on Linux.
+- **Eight voices, none with a consent note**: actress1, gwyneth, marko, old_actor, rowan, snoop, voice,
+  voice1. All show red. The notes are Baba's to give (brief 2.2).
+
 ## NOT TESTED
 
 - **Nothing ran on a Mac.** Not the installer, the launcher, Homebrew's ffmpeg or its rubberband, Chrome
-  on macOS, or the file chooser there.
+  on macOS, or the file chooser there. *11.9.2026: the installer, the updater, the server and ffmpeg
+  now have (see MEASURED ON THE MAC). Still not: the launcher's panel and keys, Chrome, the file chooser.*
 - **The real models were never called.** `/hear` and `/say` were a stand-in in their exact response
   shapes. Unexercised: Whisper's actual word times on his voice, a real clone's line and its tokens,
   and whether the clone's word count matches his on real speech (the route refuses when it does not;
@@ -126,7 +149,8 @@ Chromium, says to press q and start again.
 - **How the transform sounds.** The 7.5 ms is where sound lands on tone bursts, not whether a stretched
   vowel of a real voice smears. That is question three of the brief, and it is his.
 - **Croatian.** MANTRA_VOICE's ears are fixed to English; a Croatian take was not tried.
-- **MANTRA_VOICE under its LaunchAgent after a pull**, and its own Voices page after the change.
+- **MANTRA_VOICE under its LaunchAgent after a pull** — *measured 11.9.2026, see above* — and its own
+  Voices page after the change.
 - **Long takes.** The longest take transformed was 3 seconds with 4 words. The edge snapping reads
   samples in pure Python; a 60-second take has not been timed.
 - **Two transforms of one cell at once**, from two tabs. Both write the same `gen/` file through a
