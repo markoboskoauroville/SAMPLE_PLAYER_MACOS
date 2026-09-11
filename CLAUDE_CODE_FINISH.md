@@ -506,3 +506,9 @@ Each session adds a line: date, what was ticked, commits, what is blocking.
     11.9.2026  Question 4 repeated the voices' notes: verified word for word, 8 of 8, nothing
                rewritten. hotspot.sh: bash -n clean, run on the corporate network, stops at step 1
                in 6 s with exit 1 ("port 22 is blocked on this network"), pushed (ABLETON_TEACHER).
+    11.9.2026  Baba, outside the brief: a second click stops the playing cell; the bar reads
+               "mode: PLAY/REC", small, left; the gear right, no frame. Built as v3.4: 138 tests,
+               58 checks, the upgrade v3.2 -> v3.4 and back run for real, the bar looked at in
+               Chrome. Committed, NOT pushed (app files need his yes). The new gate found the
+               gates' comment stripper eating nine tenths of the page since the first edition;
+               fixed, one false-red check narrowed, the face written into the manifest (6a).

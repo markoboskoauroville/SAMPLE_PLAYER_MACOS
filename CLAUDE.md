@@ -25,7 +25,7 @@ Read `~/Developer/MANTRA_MANIFEST/START_HERE.md` and the modules it routes you t
 ## ON EVERY CHANGE
 
     python3 tests/test_server.py        138 cases at v3.3 (135 at v3.2)
-    python3 scripts/gates.py            57 checks at v3.3 (55 at v3.2), 2 honestly not run
+    python3 scripts/gates.py            58 checks at v3.4 (55 at v3.2), 2 honestly not run
 
 Run them with `PYTHONDONTWRITEBYTECODE=1`. A red gate is read, not obeyed: three times out of four the
 check was wrong and the code was right, and the fix belongs in the check with the reason above it. A

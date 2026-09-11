@@ -85,7 +85,7 @@ Recording over a cell that already holds a take **or a line** asks first, and of
 well as Cancel and OK.
 
     space         stop this cell, start the next
-    m             swap REC and PLAY
+    m             swap REC and PLAY (the small "mode:" button at the top left does the same)
     left / right  flip the page
     i / o         mark the in and out points, on the cell page
     esc           stop everything
@@ -322,7 +322,7 @@ The reasoning behind each is in the brief.
 ## RUNNING THE CHECKS
 
     python3 tests/test_server.py     138 cases, no network, no browser (three need ffmpeg)
-    python3 scripts/gates.py         57 checks, 2 honestly not run
+    python3 scripts/gates.py         58 checks, 2 honestly not run
 
 ## WHAT HAS NEVER BEEN PROVEN
 
