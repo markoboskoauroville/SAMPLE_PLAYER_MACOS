@@ -41,6 +41,9 @@ honest version of `curl | bash`:
 - [`DEVELOPMENT.md`](DEVELOPMENT.md) — every decision and why, and what is not ported yet.
 - [`CLAUDE_CODE_FINISH.md`](CLAUDE_CODE_FINISH.md) — for Claude Code on the Mac: everything the chat
   session could not finish, including the Oracle machine, in order, with ticks. `CLAUDE.md` points at it.
+  **To start it, paste into Claude Code:** *Clone or pull github.com/markoboskoauroville/SAMPLE_PLAYER_MACOS
+  into ~/Developer, read CLAUDE.md and CLAUDE_CODE_FINISH.md there, and do every step in order; I am on a
+  corporate network where outbound SSH on port 22 is blocked.*
 - [`DELIVERY_RECORD.md`](DELIVERY_RECORD.md) — what was measured for the current release, what
   failed on the way, and what was not tested.
 - [`NEXT_SESSION_VOICE_TRANSFORM.md`](NEXT_SESSION_VOICE_TRANSFORM.md) — the voice transform brief,

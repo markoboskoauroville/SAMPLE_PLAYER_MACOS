@@ -9,6 +9,13 @@ the unfinished work lives in one brief.
 is the job. Tick a box in the file and commit when a step is done and its result is written down, so a
 new session knows where to continue. When every box is ticked, say so to Baba and delete nothing.
 
+## THE NETWORK
+
+**Baba is often on a corporate network where outbound SSH on port 22 is blocked.** Anything that uses
+`ssh` to the Oracle machine will time out there. The brief's Part 0.3 measures what gets through and
+Part 4.0 sets up a route; do not start Oracle work before both are done, and ask Baba before carrying
+SSH through the company's network in any form.
+
 ## BEFORE ANYTHING
 
 Read `~/Developer/MANTRA_MANIFEST/START_HERE.md` and the modules it routes you to. Always:
@@ -34,6 +41,6 @@ new test is not believed until it has been seen failing on the old code.
 - **Secrets are never printed**, not in a command, a log, a commit or a message. Keys live in
   `~/Developer/api/`. Length and first four characters only.
 - **A local engine needs no key, no credit probe and no spend line.**
-- **Ask before:** restarting or resizing the Oracle machine, anything that costs money, writing
+- **Ask before:** tunnelling SSH through the company network, restarting or resizing the Oracle machine, anything that costs money, writing
   anybody's consent note (the words are his), deleting anything, and pushing to `main` or `master`.
 - **Do not touch** `MANTRA_MANIFEST/EXCHANGE.md` or anything belonging to THE BRAIN BRAKE.

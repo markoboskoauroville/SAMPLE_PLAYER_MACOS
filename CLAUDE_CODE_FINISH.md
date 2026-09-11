@@ -14,6 +14,21 @@ date, and carry on.
 repository [`DELIVERY_RECORD.md`](DELIVERY_RECORD.md) (what was measured and what was not),
 [`HANDOFF.md`](HANDOFF.md), and [`NEXT_SESSION_VOICE_TRANSFORM.md`](NEXT_SESSION_VOICE_TRANSFORM.md).
 
+## FOR BABA: HOW THIS IS STARTED
+
+Open Claude Code on the Mac, in any folder, and paste this one sentence:
+
+    Clone or pull github.com/markoboskoauroville/SAMPLE_PLAYER_MACOS into ~/Developer, read CLAUDE.md and CLAUDE_CODE_FINISH.md there, and do every step in order; I am on a corporate network where outbound SSH on port 22 is blocked.
+
+To continue on another day, open Claude Code in `~/Developer/SAMPLE_PLAYER_MACOS` and type `claude -c`,
+or paste the same sentence into a new session: the ticks in this file say where to pick up.
+
+**Claude Code, on receiving that sentence:** do Part 0 first. If you were started outside
+`~/Developer/SAMPLE_PLAYER_MACOS`, use `/add-dir` for that folder and for `~/Developer/MANTRA_VOICE`,
+`~/Developer/MANTRA_MANIFEST` and `~/Developer/ABLETON_TEACHER` once they exist, then read `CLAUDE.md`.
+**The network matters from the first step**: git, `oci`, Cloudflare and Oracle all go out through the
+company network, so Part 0.3 is measured before anything depends on it.
+
 ---
 
 ## PART 0 — WHERE THINGS ARE
@@ -32,6 +47,24 @@ repository [`DELIVERY_RECORD.md`](DELIVERY_RECORD.md) (what was measured and wha
 - [ ] **0.2 The tools answer.** `python3 --version`, `ffmpeg -version`, `oci --version`, `gh auth
   status`, and `ls -l ~/.ssh/oracle_vm ~/.oci/teacher-vm.json` (existence and permissions only; never
   print a key). Write what is missing into the log and stop to ask Baba if `oci` or the ssh key is.
+
+- [ ] **0.3 What the company network lets through, measured.** Baba works on a corporate network where
+  **outbound port 22 is blocked** (his words, 11.9.2026). Measure the rest instead of assuming, each with
+  a deadline, and write the answers into the log:
+
+      nc -vz -w 6 130.61.181.83 22                                          expected: blocked
+      nc -vz -w 6 130.61.181.83 443                                         the machine's Caddy
+      curl -sS -m 10 -o /dev/null -w '%{http_code}\n' https://ttt-lll.pages.dev/portal/api/health
+      curl -sS -m 10 -o /dev/null -w '%{http_code}\n' https://iaas.eu-frankfurt-1.oraclecloud.com/
+      curl -sS -m 10 -o /dev/null -w '%{http_code}\n' https://api.cloudflare.com/client/v4/
+      nc -vz -w 6 instance-console.eu-frankfurt-1.oci.oraclecloud.com 443
+      scutil --proxy | grep -E 'Enable|Port'                                is there a system proxy
+      env | grep -io '^[a-z_]*proxy[a-z_]*' | sort -u                         proxy variable NAMES only
+
+  **Print proxy variable names, never their values**: a corporate proxy URL often carries a user name and
+  password. If `curl` works only through a proxy, the same variables must reach `oci` and `cloudflared`.
+  If a certificate error appears, the company inspects TLS; Claude Code's own docs have a page on it
+  ("Certificate errors behind a TLS-inspecting proxy").
 
 ---
 
@@ -164,7 +197,70 @@ Maha, the portal, Flask Maha and Claude Toki all live on that one machine.
 
 Everything on the machine is installed from the internet, never copied from the Mac (Baba, 7.9.2026).
 
-- [ ] **4.1 What the machine is, measured.** Open `remote.py open` for Baba, then through `remote.py run`:
+**Every `ssh` above assumes port 22 is open, and on Baba's corporate network it is not.** `remote.py`,
+`walk.py` and the ssh lines in `second.sh`'s instructions will all time out there. Part 4.0 comes first.
+
+- [ ] **4.0 A way to the machine that does not need outbound port 22.**
+
+  **What needs no shell at all.** The resize in 4.4 is `oci`, which talks to Oracle over HTTPS; if 0.3
+  showed Oracle's API reachable, the resize itself needs no route. The door's health and the portal need
+  none either. **Only measuring inside the machine (4.1), checking services after the resize, `walk.py`,
+  and Part 5 need a shell.**
+
+  **Ask Baba one question before building anything that carries SSH through the company network:**
+  whether Nova TV's IT rules allow it. A company that blocks port 22 may consider an SSH tunnel inside
+  HTTPS a way around its firewall, and that is his call and his employer's, not a technical one. The
+  routes below are in order: the first two do not pass SSH through the company network at all.
+
+  1. **A network that is not the company's.** The phone as a hotspot, or home. Port 22 works there and
+     nothing on the machine changes. Measure with the same `nc` line. **This is the simplest route and
+     the one to use for anything done once**, such as 4.1 and adding a key for route 2.
+  2. **Oracle Cloud Shell**, the terminal inside Oracle's web console, running in Oracle's own network.
+     Oracle's own tutorial lists Cloud Shell as a way to SSH to an instance. From the company network it
+     is only a web page. It needs a key: **do not upload `~/.ssh/oracle_vm` to it.** Make a new key inside
+     Cloud Shell, and add its public half to the machine's `~/.ssh/authorized_keys` once over route 1,
+     with a comment naming it `cloud-shell`. Then Claude Code writes the commands, Baba pastes them into
+     Cloud Shell, and reads back the output. Slower, but it needs nothing new on the machine.
+  3. **SSH inside the existing Cloudflare tunnel**, only if Baba says the company allows it.
+     `ABLETON_TEACHER/oracle/tunnel.py` made (or was written to make) a tunnel called `teacher-vm` with
+     `cloudflared` running on the machine as a service, and it sets the tunnel's routes **through
+     Cloudflare's API, over HTTPS** — so a route can be added without any shell on the machine. First
+     `python3 oracle/tunnel.py show`: is the tunnel there, and is it **connected**? If not, `cloudflared` is
+     not running on the machine and this route needs route 1 once to install it. If it is connected:
+     - add a route `ssh.<zone>` to `ssh://localhost:22` through the same API `tunnel.py` uses (extend
+       `tunnel.py` with the route rather than clicking in the dashboard, so it is recorded);
+     - **protect that hostname with a Cloudflare Access application** that admits only Baba's email,
+       before the route is live, so the machine's SSH is not one more public door;
+     - on the Mac, `brew install cloudflared`, and in `~/.ssh/config`:
+
+           Host teacher-vm-cf
+             HostName ssh.<zone>
+             User ubuntu
+             IdentityFile ~/.ssh/oracle_vm
+             ProxyCommand cloudflared access ssh --hostname %h
+
+       `cloudflared access ssh` carries SSH inside a WebSocket over 443, as Cloudflare's documentation
+       describes. A proxy that inspects TLS may still break it; measure, do not assume.
+  4. **Oracle's serial console connection**, for emergencies only. Oracle's console connection is SSH on
+     **port 443** to `instance-console.eu-frankfurt-1.oci.oraclecloud.com`, so it may pass where 22 does
+     not; but it is a serial console, one connection at a time, and it will ask for a login password the
+     `ubuntu` user may not have. Write down whether 0.3 reached it, and do not build on it.
+
+  **Not routes, and why.** Oracle's **Bastion** service connects on port 22 as well. Oracle's **Run
+  Command** executes scripts through its HTTPS API, but Oracle's own page lists its supported images as
+  Oracle Linux, Autonomous Linux, CentOS and Windows Server, and this machine is **Ubuntu 24.04** — check
+  with `oci instance-agent plugin list` before writing it off, since `second.sh` mentions it, and correct
+  this line in place if it works.
+
+  **One place for how to reach the machine.** `remote.py` and `walk.py` each build their own
+  `ssh -i ~/.ssh/oracle_vm ubuntu@130.61.181.83`. Change both to `ssh teacher-vm`, with `~/.ssh/config`
+  deciding what that means — the direct address at home, `teacher-vm-cf` through Cloudflare at work — so
+  the scripts do not care which network the Mac is on. Keep `ConnectTimeout` and `BatchMode`. **Test on
+  both networks**: `python3 oracle/remote.py run "nproc"` must answer on each route that is set up, and
+  write which routes answered from where into `lessons/oracle-vm.md`.
+
+- [ ] **4.1 What the machine is, measured.** Through the route 4.0 set up (on route 2, Baba pastes and
+  reads back). Where `remote.py` works, open `remote.py open` for Baba first, then `remote.py run`:
 
       nproc; free -m; swapon --show; df -h /; uptime
       systemctl is-active maha portal maha-flask claude-toki caddy
@@ -196,7 +292,8 @@ Everything on the machine is installed from the internet, never copied from the 
       oci compute instance update --instance-id "$(jq -r .id ~/.oci/teacher-vm.json)" \
           --shape-config '{"ocpus": 2, "memoryInGBs": 12}'
 
-  Wait for RUNNING with a counted loop, never an unbounded one. Then, and only then, call it done:
+  The resize itself is `oci` over HTTPS and needs no route to the machine. Wait for RUNNING with a
+  counted loop, never an unbounded one. Then, and only then, call it done, **through a route from 4.0**:
   4.1's measurements again (nproc must say 2), every service active, the door's health answers, and
   `python3 oracle/walk.py` passes — write its counts and times beside the 7.9.2026 baseline.
 
@@ -246,3 +343,4 @@ the machine**: a cloned voice was measured at minutes a sentence on four ARM cor
 Each session adds a line: date, what was ticked, commits, what is blocking.
 
     11.9.2026  brief written by the chat session; nothing on this list has been started
+    11.9.2026  Part 0.3 and 4.0 added: Baba's corporate network blocks outbound port 22
