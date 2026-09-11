@@ -33,7 +33,7 @@ company network, so Part 0.3 is measured before anything depends on it.
 
 ## PART 0 — WHERE THINGS ARE
 
-- [ ] **0.1 The repositories are here and current.** Each at `~/Developer/<NAME>`; clone any that is
+- [x] **0.1 The repositories are here and current.** Each at `~/Developer/<NAME>`; clone any that is
   missing, `git pull` each, and write the commit each is at into the log at the bottom of this file.
 
       SAMPLE_PLAYER_MACOS   main    at least the commit that added this file (v3.2)
@@ -44,11 +44,11 @@ company network, so Part 0.3 is measured before anything depends on it.
   **MANTRA_VOICE's branch is `master`, not `main`.** On 11.9.2026 a `git worktree add … main` failed on
   that and a test silently ran the new code as if it were the old.
 
-- [ ] **0.2 The tools answer.** `python3 --version`, `ffmpeg -version`, `oci --version`, `gh auth
+- [x] **0.2 The tools answer.** `python3 --version`, `ffmpeg -version`, `oci --version`, `gh auth
   status`, and `ls -l ~/.ssh/oracle_vm ~/.oci/teacher-vm.json` (existence and permissions only; never
   print a key). Write what is missing into the log and stop to ask Baba if `oci` or the ssh key is.
 
-- [ ] **0.3 What the company network lets through, measured.** Baba works on a corporate network where
+- [x] **0.3 What the company network lets through, measured.** Baba works on a corporate network where
   **outbound port 22 is blocked** (his words, 11.9.2026). Measure the rest instead of assuming, each with
   a deadline, and write the answers into the log:
 
@@ -344,3 +344,24 @@ Each session adds a line: date, what was ticked, commits, what is blocking.
 
     11.9.2026  brief written by the chat session; nothing on this list has been started
     11.9.2026  Part 0.3 and 4.0 added: Baba's corporate network blocks outbound port 22
+    11.9.2026  Claude Code on the Mac, first session. Part 0 done, all over HTTPS (git, gh, oci).
+               0.1  SAMPLE_PLAYER_MACOS main 4bba925 · MANTRA_VOICE master 8fc0373 · MANTRA_MANIFEST
+                    main fb0de6a (29a3692 is two behind it) · ABLETON_TEACHER master 3e3fbac (cloned
+                    fresh; oracle/ holds vm.py remote.py walk.py second.sh tunnel.py net.py base.sh
+                    caddy.sh)
+               0.2  python3 3.10.14 · ffmpeg 9.0.1 · oci 3.92.0 · gh logged in as
+                    markoboskoauroville over https · ~/.ssh/oracle_vm 600, 419 bytes ·
+                    ~/.oci/teacher-vm.json 644, 246 bytes · jq and nc present · cloudflared NOT
+                    installed (only route 3 of 4.0 needs it). Nothing missing that stops the work.
+               0.3  measured from the corporate network, each with its deadline:
+                      130.61.181.83:22           BLOCKED  (nc timed out after 6 s)
+                      130.61.181.83:443          open     (Caddy answers)
+                      door /portal/api/health    200      {"ok":true,"users":1}
+                      iaas.eu-frankfurt-1        404      reachable; 404 is the bare root
+                      api.cloudflare.com/v4      400      reachable; 400 is the bare root
+                      instance-console…:443      open
+                      scutil --proxy             no Enable or Port lines: no system proxy
+                      proxy env variable names   none
+                    No proxy and no TLS inspection seen, so oci and cloudflared need no extra
+                    variables. The Oracle API is reachable, so the resize in 4.4 needs no route to
+                    the machine. Only a shell on the machine is blocked.
