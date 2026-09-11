@@ -203,6 +203,24 @@ written up in HANDOFF.md), and the page's credit-button comment (HANDOFF.md, "TH
 Each was cut to its one-line reason and a pointer to the document that holds the rest. The budget:
 250,831 of 260,000 bytes, 9,169 free.
 
+### First click plays, second click stops (v3.4, 11.9.2026)
+
+Baba: "it does not repeat playing on second click. First click plays, second click stops." Until v3.3
+a second click on a playing cell started the take again from its in point, while a looping cell
+already stopped on the second click. Now `press()` asks first whether this cell is the one playing,
+and stops it; the loop toggle and the play come after. A gate holds the order.
+
+Same evening, the bar: "please write mode next to play … it needs to be clear that it is a mode, align
+it to the left side of the screen, make the button smaller, and settings on the right without a frame."
+So `bar()` puts a small "mode: PLAY" / "mode: REC" first, then the spacer, the page arrows, and a bare
+gear. `mk()` sets `flex: 1` inline, which beats a class, so the button's width is set inline too.
+
+**And the gate written for the click found the gates half blind.** `code_only` dropped every line
+beginning with a star before matching block comments, so a comment's own closing `*/` line vanished
+and each `/*` ran on to the next `*/` that ended a text line: 11,833 of the page's 112,337 characters
+survived. Comments are matched first now. One check went red at once on `e.key`, the keyboard's key;
+narrowed. Written into `MANTRA_MANIFEST/modules/checking-the-checks.md` as face 6a.
+
 ### The stale-server case
 
 `sampleplayer-update` run in a second terminal replaces the page on disk while the panel's old server

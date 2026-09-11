@@ -1,26 +1,31 @@
-# DELIVERY RECORD — Sample Player, macOS — v3.3 — 11.9.2026
+# DELIVERY RECORD — Sample Player, macOS — v3.4 — 11.9.2026
 
 **What was measured for this release, what failed on the way, and what was not tested.** Rewritten
 per release. The decisions are in [`DEVELOPMENT.md`](DEVELOPMENT.md); the state is in
-[`HANDOFF.md`](HANDOFF.md). The v3.2 record is in git history at commit 4bba925.
+[`HANDOFF.md`](HANDOFF.md). The v3.2 record is at commit 4bba925 and v3.3's at 76ff4ba.
 
 ## ARTEFACT
 
 The three files `update.sh` fetches from one commit of `main`, plus the updater itself:
 
-    server.py                           108,139 bytes   sha256 fbeabe56ef9fa2df…
-    static/index.html                   119,039 bytes   sha256 ca76b2a5ec280ebf…
-    3sh_i_sample_player_v1_macos.sh      17,577 bytes   sha256 0d8e28fa47dc29cb…
+    server.py                           108,139 bytes   sha256 a05f8ca596db35c2…
+    static/index.html                   119,918 bytes   sha256 71de5efbc597b989…
+    3sh_i_sample_player_v1_macos.sh      17,694 bytes   sha256 91781c0c8aa38f50…
     update.sh                             6,684 bytes   sha256 dd8084ffe7e1cf25…
 
-    VERSION     new v3.3    previous v3.2, commit 4bba925 on main
+    VERSION     new v3.4    previous v3.3, commit 72694e8 on main (v3.2 at 4bba925)
     DEPENDS ON  MANTRA_VOICE master from commit 49a07a2 for the consent note (8fc0373 is on this Mac).
     BUILT BY    Claude Code on Baba's Mac, from this repository's tree: the first edition made where
                 it runs. No CI; accepted in the record as v3.2's was.
 
 ## WHAT IS NEW
 
-Three fixes and no feature. Two transforms at once no longer read each other's clone (a folder per
+**v3.4, the same evening, two things Baba asked for on the page:** a second click on the playing cell
+stops it (it used to start the take again; only a looping cell stopped), and the bar reads as a mode:
+"mode: PLAY" or "mode: REC", small, at the left, with the settings gear alone on the right and no frame.
+Nothing on the server changed but the edition.
+
+**v3.3, earlier that day.** Three fixes and no feature. Two transforms at once no longer read each other's clone (a folder per
 transform, removed when it ends; `write_wav` through `mkstemp`, so one cell from two tabs finishes two
 whole files). The updater fetches the installer, the server and the page from one commit rather than
 three separately cached files from `main`. Stale transform folders are swept at start, and the
@@ -47,14 +52,21 @@ installer creates the key file at mode 600. 4,219 bytes of comment that repeated
     G8 upgrade      pass   see below, run for real on this Mac
     G9 record       this document
 
-    checks run 57, failures 0, not run 2          (v3.2: 55)
+    checks run 58, failures 0, not run 2          (v3.3: 57, v3.2: 55)
 
-**Both new gates were seen red**: the fixed folder and the fixed `.tmp` name each put back in turn,
+**The v3.4 gate, "a second click on the playing cell stops it", was seen red** with the stop line
+removed. **And writing it found that the gates' comment stripper had been eating nine tenths of the
+page**: a closing `*/` on its own line begins with a star, the stripper dropped star lines before
+matching comments, and every block comment ran on to the next `*/` that ended a text line. The
+page's stripped code was 11,833 of 112,337 characters. Fixed (comments first, lines second); the
+page's code is 82,158 characters now, and one older check, "nothing in the app can render a key",
+promptly went red on `e.key`, the keyboard's key, seven times — the check had never looked at that
+part of the page. Narrowed, with the reason beside it. Both v3.3 gates were seen red: the fixed folder and the fixed `.tmp` name each put back in turn,
 and the updater's commit resolution removed.
 
 ## TESTS — `python3 tests/test_server.py`
 
-    138 cases, 0 failures                         (v3.2: 135)
+    138 cases, 0 failures                         (v3.3: 138, v3.2: 135)
 
 The three new ones: two threads transform two cells against a stand-in MANTRA_VOICE answering two
 clips of different loudness, with a barrier at the decode so the collision is certain — **red on v3.2
@@ -62,6 +74,8 @@ every run** (both cells came out at the loud clip's peak 13,345; after the fix 1
 transform's temporary folder is gone when it ends; stale folders are swept at start.
 
 ## G8 — UPGRADE, AND THE WAY BACK, RUN FOR REAL ON THIS MAC
+
+Run for v3.3 and again for v3.4 (v3.2 → v3.4 → v3.2 → v3.4), the same results both times.
 
 Under a throwaway home. v3.2's three files from commit 4bba925, installed with its own installer,
 checked to be v3.2, and used: a real take recorded into cell 3 through `/api/record`, words, loop, in
@@ -79,8 +93,8 @@ it, v3.3 installed over it, the server started again.
     tracebacks                                     0
 
 **Back, v3.3 to v3.2.** v3.2 installed over it: v3.2 reads the cell (200, the same bytes), the same
-download name, **files touched by the rollback: 0** (digests compared), tracebacks 0. Forward to v3.3
-again: the same name, and the second install changed nothing.
+download name, **files touched by the rollback: 0** (digests compared), tracebacks 0. Forward again:
+the same name, and the second install changed nothing.
 
 **The first run of this test found a fault**: after v3.3's transform one temporary folder remained. It
 was v3.2's fixed `tmp-transform/`, which v3.2 never removed. v3.3 now sweeps `tmp-transform*` at start.
@@ -150,6 +164,10 @@ day this code ran where it is meant to run. Each line is a thing that was on NOT
 
 ## FAILED ON THE WAY
 
+- **The gates read a tenth of the page for months and said PASS** (v3.4). See GATES above. A check
+  that finds nothing and a check that runs on nothing look the same; this one printed counts from
+  the raw page while its stripped copy was nearly empty. In the manifest's checking-the-checks.
+
 - **Two transforms at once overwrote each other's clone** (Part 1 of the brief). Found after v3.2 was
   delivered; the test was red on v3.2 every run; fixed as above.
 - **v3.2 left its temporary folder behind, for ever.** Seen in the upgrade test, not by reading.
@@ -169,7 +187,8 @@ day this code ran where it is meant to run. Each line is a thing that was on NOT
 - **How the transform sounds**, against picture: Baba's ears, `~/Desktop/transform-listening/`.
 - **The page in Chrome on macOS**: the badge colours, Transform this take, the report, Add a voice…
   with the file picker, the dimmed button, ⤓ Download's file name in Downloads. The routes behind
-  every one of them ran; the clicks did not.
+  every one of them ran; the clicks did not. *v3.4's bar was looked at in Chrome from a throwaway
+  server: "mode: REC" small at the left, the gear at the right. The second click was not clicked.*
 - **The launcher's panel and its keys** (o, f, l, r, u, q): the server was started the launcher's way,
   the panel was not driven.
 - **The soak and the monkey**; cold start, memory and battery.
@@ -186,4 +205,4 @@ day this code ran where it is meant to run. Each line is a thing that was on NOT
   installer from `raw/main`, which is cached 300 s. Seen at 17:51 on 11.9.2026 with v3.3 installed.
 - **The six Croatian takes** put into cells 1 to 6 of project-01 for the measurement are Baba's to
   keep or delete.
-- **8,561 bytes of the source budget remain.**
+- **7,565 bytes of the source budget remain.**

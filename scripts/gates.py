@@ -59,17 +59,20 @@ def code_only(text):
     has satisfied a check the code no longer met, and a comment explaining an absence has failed a
     check asserting it. Every check about what the CODE does goes through here.
     """
+    # BLOCK COMMENTS FIRST, LINES SECOND. Until 11.9.2026 the lines went first, and a closing "*/"
+    # on its own line begins with a star, so it was dropped before the comment was matched: each
+    # "/*" then ran on to the next "*/" that ended a text line, and page_code held 11,833 of the
+    # page's 112,278 characters. A gate that sliced press() from it sliced nothing.
+    triple = chr(34) * 3
+    t = re.sub(triple + ".*?" + triple, "", text, flags=re.S)
+    t = re.sub(r"/\*.*?\*/", "", t, flags=re.S)
     out = []
-    for line in text.split("\n"):
+    for line in t.split("\n"):
         st = line.strip()
         if st.startswith("#") or st.startswith("//") or st.startswith("*"):
             continue
         out.append(line)
-    t = "\n".join(out)
-    triple = chr(34) * 3
-    t = re.sub(triple + ".*?" + triple, "", t, flags=re.S)
-    t = re.sub(r"/\*.*?\*/", "", t, flags=re.S)
-    return t
+    return "\n".join(out)
 
 
 server_src = open(SERVER, encoding="utf-8").read()
@@ -78,7 +81,11 @@ installer_src = open(INSTALLER, encoding="utf-8").read()
 updater_src = open(UPDATER, encoding="utf-8").read()
 server_code = code_only(server_src)
 page_js = page_src[page_src.index("<script>") + 8:page_src.rindex("</script>")]
-page_code = code_only(page_js)
+# accept="audio/*,.wav" IS NOT A COMMENT. Three file pickers carry a slash-star that code_only read as
+# the start of a comment, and everything up to the next real comment's end vanished from page_code —
+# press() among it (found 11.9.2026 when a gate on press() sliced nothing). The picker's comma is
+# what a comment never begins with.
+page_code = code_only(page_js.replace("/*,", "/_,"))
 
 print("SAMPLE PLAYER — macOS edition — the nine gates")
 print("files examined: server.py %d lines, index.html %d lines, installer %d, updater %d"
@@ -145,8 +152,10 @@ check("G2", "no key-shaped literal in any file", hits == [],
 check("G2", "nothing in the app can render a key",
       "masked(" in server_code
       and "r.masked" in page_src
-      and not re.search(r"\.key\b(?!s)", page_code),
-      "the key list shows provider, label and six-and-four")
+      and not re.search(r"(?<!\be)\.key\b(?!s)", page_code),
+      # e.key is the keyboard's key, seven times in the hotkeys. Seen the moment code_only stopped
+      # eating the page (11.9.2026): the check had never looked at that part of the code.
+      "the key list shows provider, label and six-and-four; e.key is a keyboard key")
 check("G2", "the dead list holds fingerprints rather than keys",
       "hashlib.sha256" in server_code and "dead" in server_code,
       "SHA-256 of the key, never the key")
@@ -301,6 +310,10 @@ check("G6", "two transforms at once cannot share a temporary file",
       "mkdtemp(" in transform and "rmtree(" in transform and 'join(APPDIR, "tmp-transform")' not in transform
       and "mkstemp(" in writer and 'path + ".tmp"' not in writer,
       "a folder per request, removed at the end; write_wav through mkstemp. A fixed name here is red")
+pressed = page_code[page_code.find("function press("):page_code.find("function speakThenPlay(")]
+check("G6", "a second click on the playing cell stops it",
+      0 < len(pressed) < 2000 and -1 < pressed.find("S.playing === i) return stopAudio()") < pressed.find("return play(i)"),
+      "%d characters of press(): stop is decided before play (Baba, 11.9.2026)" % len(pressed))
 skip("G6", "the soak and the monkey", "needs a Mac with a microphone and a browser")
 
 # ── G7 BUDGETS ────────────────────────────────────────────────────────────────────────────────

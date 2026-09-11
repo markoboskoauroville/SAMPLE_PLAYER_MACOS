@@ -1,6 +1,6 @@
 #!/bin/bash
 # ---------------------------------------------------------------------------
-# SAMPLE PLAYER — installer for macOS                        edition: v3.3
+# SAMPLE PLAYER — installer for macOS                        edition: v3.4
 # (updater Test 4, 11.9.2026: this line was the trivial change pushed to prove the three files come from one commit)
 #
 # repo: SAMPLE_PLAYER_MACOS

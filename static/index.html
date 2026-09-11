@@ -35,7 +35,9 @@ button:disabled{opacity:.4;cursor:default}
 .cell.full .n{color:#fff}
 .cell canvas{width:100%;flex:1;min-height:0}
 .cell .w{white-space:nowrap;overflow:hidden;color:var(--text);font-size:10px}
-#bar{padding-bottom:6px;display:flex;gap:6px;justify-content:flex-end}
+#bar{padding-bottom:6px;display:flex;gap:6px;justify-content:flex-end;align-items:center}
+#bar .mode{flex:0 0 auto;font-size:.8em;padding:4px 10px;letter-spacing:.04em}
+#bar .gear{flex:0 0 auto;background:none;border:none;font-size:1.3em;padding:2px 4px}
 #screen{position:fixed;inset:0;background:#000;padding:12px;overflow:auto;display:none}
 #screen.on{display:block}
 h2{font-size:14px;font-weight:normal;margin:0 0 8px}
@@ -356,6 +358,9 @@ function press(i){
   } else {
     if (!hasContent(c)) return stage("nothing in cell " + (i+1));
     if (c.hasAudio){
+      // FIRST CLICK PLAYS, SECOND CLICK STOPS (Baba, 11.9.2026). The second click used to start the
+      // take again from its in point; only a looping cell stopped.
+      if (S.playing === i) return stopAudio();
       if (c.loop) return toggleLoop(i);
       return play(i);
     }
@@ -610,16 +615,22 @@ function toggleLoop(i){
 /* ─────────────────────────────────────────────────────────────── the bar ── */
 function bar(){
   const b = $("#bar"); b.innerHTML = "";
+  // THE MODE READS AS A MODE, ON THE LEFT, SMALL (Baba, 11.9.2026): "mode: PLAY" or "mode: REC", the
+  // one switch that changes what a click on a cell does. The settings gear sits on the right with no
+  // frame; the page arrows stay beside it.
+  const mode = mk("mode: " + (S.mode === "play" ? "PLAY" : "REC"),
+    () => { stopAudio(); S.mode = S.mode === "play" ? "rec" : "play"; draw(); },
+    S.mode === "play" ? "var(--amber)" : "var(--red)");
+  mode.classList.add("mode"); mode.style.flex = "0 0 auto"; mode.title = "m swaps REC and PLAY";   // mk() sets flex:1 inline
+  b.appendChild(mode);
   const spacer = document.createElement("div"); spacer.style.flex = "1"; b.appendChild(spacer);
   const L = layout();
   if (L.pageCount > 1){
     b.appendChild(mk("‹", () => { S.page = Math.max(0, S.page-1); draw(); }));
     b.appendChild(mk("›", () => { S.page = Math.min(L.pageCount-1, S.page+1); draw(); }));
   }
-  b.appendChild(mk(S.mode === "play" ? "PLAY" : "REC",
-    () => { stopAudio(); S.mode = S.mode === "play" ? "rec" : "play"; draw(); },
-    S.mode === "play" ? "var(--amber)" : "var(--red)"));
-  b.appendChild(mk("⚙", () => shell("settings")));
+  const gear = mk("⚙", () => shell("settings")); gear.className = "gear"; gear.title = "settings";
+  b.appendChild(gear);
 }
 
 /* ────────────────────────────────────────────────────────────── screens ── */

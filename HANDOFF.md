@@ -2,7 +2,7 @@
 
 **The finished state of the app. Nothing about how it got here.**
 
-Installer edition v3.3. Repository public at `markoboskoauroville/SAMPLE_PLAYER_MACOS`.
+Installer edition v3.4. Repository public at `markoboskoauroville/SAMPLE_PLAYER_MACOS`.
 
 Every decision and every gap is in [`DEVELOPMENT.md`](DEVELOPMENT.md).
 
@@ -79,7 +79,7 @@ Identical to the phone, cell for cell, so a project directory copies between the
 A grid that fills the window. Right-click a cell for its menu; left-click is the press.
 
     REC     click a cell to record into it, click again to stop
-    PLAY    click a cell to play from there, or toggle its loop if it is marked
+    PLAY    click a cell to play from there; click it again to stop; a marked cell toggles its loop
 
 Recording over a cell that already holds a take **or a line** asks first, and offers **Play** as
 well as Cancel and OK.
