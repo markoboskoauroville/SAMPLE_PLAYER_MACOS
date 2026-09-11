@@ -512,6 +512,9 @@ Each session adds a line: date, what was ticked, commits, what is blocking.
                Chrome. Committed, NOT pushed (app files need his yes). The new gate found the
                gates' comment stripper eating nine tenths of the page since the first edition;
                fixed, one false-red check narrowed, the face written into the manifest (6a).
+    11.9.2026  Baba: the recording cell's left corner counts the seconds with a V meter above.
+               Added to v3.4 (59 checks, seen red; not looked at, needs a microphone). Still not
+               pushed with the rest of v3.4.
     11.9.2026  BABA STOPPED PATH A: "The cloned voices are bad on their own, before any transform.
                Stop all Path A work. Fix the cloning first, measuring, not guessing." 2.5, 2.6, 2.8,
                2.9 and Part 5.4 wait until the cloning is right; nothing in MANTRA_VOICE changes
