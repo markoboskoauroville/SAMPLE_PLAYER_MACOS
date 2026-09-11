@@ -200,7 +200,12 @@ Everything on the machine is installed from the internet, never copied from the 
 **Every `ssh` above assumes port 22 is open, and on Baba's corporate network it is not.** `remote.py`,
 `walk.py` and the ssh lines in `second.sh`'s instructions will all time out there. Part 4.0 comes first.
 
-- [ ] **4.0 A way to the machine that does not need outbound port 22.**
+- [x] **4.0 A way to the machine that does not need outbound port 22.** *Answered 11.9.2026. Baba:
+  "treat SSH through the company network as not allowed. Do not build the Cloudflare route." So route 1
+  (the phone hotspot, or home) is THE route, route 2 (Cloud Shell) stays possible because it carries
+  nothing through the company network, routes 3 and 4 are closed. `remote.py` and `walk.py` say `ssh
+  teacher-vm`, which `~/.ssh/config` defines. Everything below that needs a shell is on THE HOTSPOT LIST
+  at the end of this part, and runs the moment port 22 answers.*
 
   **What needs no shell at all.** The resize in 4.4 is `oci`, which talks to Oracle over HTTPS; if 0.3
   showed Oracle's API reachable, the resize itself needs no route. The door's health and the portal need
@@ -301,7 +306,9 @@ Everything on the machine is installed from the internet, never copied from the 
 - [ ] **4.5 The records corrected in place.** *(only the allowance wording; ocpus and gb stay 4 and 24
   unless 4.4 runs)*
 
-- [ ] **4.6 The cost, checked after a week, on 18.9.2026 or the first session after it.** Baba, 11.9.2026:
+- [ ] **4.6 The cost, checked one week after the day Baba upgrades.** He will say the day; write it here
+  when he does: *upgraded on ________, check on or after ________.* (Until 11.9.2026 evening this said
+  "on 18.9.2026"; Baba: "one week after the day I upgrade, not a fixed date".) Baba, 11.9.2026:
   "After one week, check the cost. If any compute charge appears, tell me, and we shrink the machine to
   2 cores and 12 GB. Do not create any second machine, even for a test." From the Mac, over HTTPS:
 
@@ -315,6 +322,31 @@ Everything on the machine is installed from the internet, never copied from the 
   whose default is still 4 and 24 and whose docstring still says "Always Free: A1 up to 4 OCPU and 24
   GB" — quote the old wording with the date; `lessons/oracle-vm.md`; and
   `MANTRA_MANIFEST/modules/free-machine.md` if anything there is still wrong.
+
+### THE HOTSPOT LIST — what needs a shell, ready to run when port 22 answers
+
+Baba, 11.9.2026: "Prepare everything that needs SSH as a short list, so when I'm on my phone hotspot
+or at home, it runs straight away." Only text goes through the hotspot; downloads happen on the machine.
+
+    1  nc -vz -w 6 130.61.181.83 22                          must say succeeded; if not, stop
+    2  bash ~/Developer/ABLETON_TEACHER/oracle/hotspot.sh     4.1 in one go: opens Baba's live view,
+                                                             measures the machine (nproc, memory, swap,
+                                                             disk, uptime, services active AND enabled,
+                                                             the top processes, the shape from the
+                                                             metadata service), then walk.py with the
+                                                             memory sampled every second on the machine,
+                                                             and prints the peak. About 5 minutes.
+    3  paste the output under a dated heading in ABLETON_TEACHER/lessons/oracle-vm.md, tick 4.1
+    4  (optional, route 2) if Baba has made a key in Cloud Shell and saved its public half as
+       ~/Developer/ABLETON_TEACHER/oracle/cloud-shell.pub, hotspot.sh appends it to the machine's
+       authorized_keys with the comment cloud-shell. One minute.
+    5  Part 5.3, Parakeet on the machine: install sherpa-onnx in its own venv and download the model ON
+       THE MACHINE (Oracle's line, not the hotspot), started with nohup and a log, then the benchmark.
+       Twenty to forty minutes of connection, mostly waiting; it can be started, left running, and read
+       back on the next connection.
+
+    Not on the list because it needs no shell: 4.4 (oci over HTTPS), 4.6 (the usage API), 5.1 (the
+    portal's health answer is a push to its repository; the machine pulls from GitHub every minute).
 
 ---
 
@@ -462,3 +494,7 @@ Each session adds a line: date, what was ticked, commits, what is blocking.
                budget`, one level deeper than its name): budget "one-euro-alarm", 1 EUR a month on
                the whole tenancy, two alert rules at 100 %, ACTUAL and FORECAST, emailed to Baba's
                auroville address, all ACTIVE. Console: Billing & Cost Management > Budgets.
+    11.9.2026  Baba's answer, question 3: no SSH through the company network, no Cloudflare route;
+               the hotspot list written under Part 4 and oracle/hotspot.sh made in ABLETON_TEACHER.
+               4.6 retied to one week after the day he upgrades. Pushing the brief, the log and the
+               records no longer needs asking; the four app files still do (CLAUDE.md).
