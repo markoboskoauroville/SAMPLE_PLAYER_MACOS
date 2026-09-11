@@ -26,10 +26,13 @@ WHAT IS DIFFERENT, AND WHY
 
 import base64
 import json
+import math
 import os
 import re
+import shutil
 import socket
 import struct
+import subprocess
 import sys
 import time
 import urllib.error
@@ -278,6 +281,19 @@ def write_meta(pid, slot, updates):
     os.makedirs(slot_dir(pid, slot), exist_ok=True)
     with open(meta_path(pid, slot), "w", encoding="utf-8") as f:
         f.write("\n".join("%s=%s" % (k, str(v).replace("\n", " ")) for k, v in m.items()))
+
+
+def generated_voices(gen_dir):
+    """
+    ONLY .wav FILES ARE VOICES. The state used to list every file in gen/, and on a Mac the first
+    time that folder is opened in Finder a .DS_Store appears in it: a cell with no audio then
+    reported a generated voice called ".DS_Store" and counted as full. A half-written .tmp did the
+    same for the length of a write.
+    """
+    if not os.path.isdir(gen_dir):
+        return []
+    return [os.path.splitext(x)[0] for x in sorted(os.listdir(gen_dir))
+            if x.endswith(".wav") and not x.startswith(".")]
 
 
 def playing_file(pid, slot):
@@ -927,7 +943,7 @@ def state():
         meta = read_meta(pid, i)
         has_original = os.path.isfile(original(pid, i))
         gen_dir = os.path.join(slot_dir(pid, i), "gen")
-        gens = [os.path.splitext(x)[0] for x in os.listdir(gen_dir)] if os.path.isdir(gen_dir) else []
+        gens = generated_voices(gen_dir)
         wf = []
         ms = 0
         rate = RATE
@@ -1096,7 +1112,8 @@ def download(slot):
     f = playing_file(pid, slot)
     if not os.path.isfile(f):
         return "", 404
-    name = slugify(read_meta(pid, slot).get("words", ""), "cell-%02d" % (slot + 1)) + ".wav"
+    meta = read_meta(pid, slot)
+    name = slugify(meta.get("words", ""), "cell-%02d" % (slot + 1)) + release_suffix(meta, f) + ".wav"
     return send_from_directory(
         os.path.dirname(f), os.path.basename(f),
         mimetype="audio/wav", as_attachment=True, download_name=name,
@@ -1267,6 +1284,521 @@ def do_speak(slot):
         f.write(audio_bytes)
     write_meta(pid, slot, {"voice": body["engine"], "voiceid": body.get("key", "")})
     return jsonify({"ok": True, "cached": from_cache})
+
+
+# ────────────────────────────────────────────────────────────── voice transform ──
+#
+# PATH A: HIS PERFORMANCE, THEIR TIMBRE, USING ONLY WHAT IS ALREADY ON THIS MAC.
+#
+# MANTRA_VOICE (127.0.0.1:8837) clones by TEXT-TO-SPEECH. It has never heard the take, so what it
+# says has the model's rhythm, not his. Path A puts his rhythm back:
+#
+#   1  /hear?words=1 on his take        his words, each with a start and an END
+#   2  /say in the cloned voice         the same words, the model's rhythm, and the clone's own
+#                                       word times (the ears hear the clip back inside /say)
+#   3  both edges snapped to the audio  Whisper's word times are tens of milliseconds loose
+#   4  a plan                           each of their words onto his word's window, the silence
+#                                       either side absorbing what it can, a phrase where a word
+#                                       alone cannot be stretched cleanly
+#   5  rubberband, one segment at a time, laid on a silent track exactly as long as his take
+#
+# THE HONEST LIMIT. Past about 1.3x a stretched vowel smears, and below about 0.75x it chirps. The
+# plan reports every segment against those two numbers instead of hiding them, so the page can say
+# which words to listen to. Whether that matters on his voice against his picture is a question
+# for his ears, and the answer decides whether real speech-to-speech conversion (Path B) is needed.
+#
+# A LOCAL ENGINE HAS NO KEY, NO CREDIT PROBE AND NO SPEND LINE, and none is bolted on here.
+
+VOICE_API = os.environ.get("MANTRA_VOICE_URL", "http://127.0.0.1:8837")
+SMEAR = 1.30      # longer than this and a held vowel audibly smears
+CHIRP = 0.75      # shorter than this and it chirps
+ABSORB = 0.30     # a pause can take 300 ms with no artefact at all; a vowel cannot
+EARLY = 0.05      # how far a word may start before his onset. Lips open first; sound may not.
+JOIN_GAP = 0.08   # words closer than this in his take are one breath and can be one phrase
+PAD = 0.05        # context either side of a segment given to rubberband, then cut away
+FADE = 0.005      # 5 ms at each join, so a cut never clicks
+FRAME = 0.010     # 10 ms analysis frames for snapping edges
+USAGES = ("public", "private")
+
+
+def ffmpeg_path():
+    """ffmpeg is not a dependency of this app. It is a dependency of MANTRA_VOICE, which this engine
+    needs anyway, and a launcher started from ~/.local/bin does not always carry Homebrew's PATH."""
+    for p in (shutil.which("ffmpeg"), "/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"):
+        if p and os.path.isfile(p):
+            return p
+    return None
+
+
+def _clean_spans(spans, total):
+    """
+    WHISPER'S TIMES ARE NOT WELL-FORMED. A word can end before it starts, two words can overlap,
+    and the last word can end after the clip does. Clamp into the clip, force a minimum length and
+    make every span start where the one before it ended at the earliest.
+    """
+    out = []
+    floor = 0.0
+    for t0, t1 in spans:
+        t0 = min(max(float(t0), floor, 0.0), total)
+        t1 = min(max(float(t1), t0 + 0.02), total)
+        if t1 - t0 < 0.02:            # squeezed against the end of the clip
+            t0 = max(floor, t1 - 0.02)
+        out.append((t0, t1))
+        floor = t1
+    return out
+
+
+def plan_stretch(his, theirs, his_total, their_total):
+    """
+    Every one of THEIR words laid onto HIS word's window.
+
+    his, theirs   lists of (start, end) in seconds, one per word, the same length and order
+    returns       [{words:[i..], src:(u0,u1), dst:(t0,t1), ratio, level, verdict}]
+
+    ratio is destination over source: 2.0 means their word is played at half speed.
+
+    The order of what is tried is the order of what it costs:
+      1  nothing, when the ratio is already clean
+      2  the silence beside the word: a long word of his leaves its tail silent, a short one
+         borrows the pause after it (and at most 50 ms before, because an early sound against a
+         mouth that has not opened is the lip sync error the eye catches first)
+      3  a phrase: the word joined to the words he ran on into after it, stretched as one
+      4  nothing more — and the verdict SAYS smear or chirp rather than claiming ok
+    """
+    n = min(len(his), len(theirs))
+    if n == 0:
+        return []
+    his = _clean_spans(his[:n], his_total)
+    theirs = _clean_spans(theirs[:n], their_total)
+
+    def verdict(ratio):
+        # A MILLIONTH OF TOLERANCE. A word borrowed or absorbed exactly to a limit lands a hair either
+        # side of it in floating point, and was reported as a chirp it had just been rescued from.
+        return "smear" if ratio > SMEAR + 1e-6 else "chirp" if ratio < CHIRP - 1e-6 else "ok"
+
+    def absorb(t0, t1, u0, u1, floor, ceiling):
+        """The window after the silence either side has been given the chance to help."""
+        src = u1 - u0
+        dst = t1 - t0
+        if dst / src > SMEAR:
+            cut = min(ABSORB, dst - src * SMEAR)
+            t1 -= cut
+        elif dst / src < CHIRP:
+            need = src * CHIRP - dst
+            after = min(need, ABSORB, max(0.0, ceiling - t1))
+            t1 += after
+            before = min(need - after, ABSORB - after, EARLY, max(0.0, t0 - floor))
+            t0 -= before
+        return t0, t1
+
+    segs = []
+    i = 0
+    floor = 0.0
+    while i < n:                                     # bounded: i advances by at least one a pass
+        # 3 — THE PHRASE. Words before i are already laid, so a phrase only grows to the right. It
+        # grows while the group is extreme and joining helps, or while the group is clean and the
+        # NEXT word is extreme and the two together come out clean — the clean word lends it room.
+        # Compared in log ratio, so 2x and 0.5x are equally far from clean.
+        lo = hi = i
+
+        def ratio(a, b):
+            return (his[b][1] - his[a][0]) / (theirs[b][1] - theirs[a][0])
+
+        for _ in range(n):                           # bounded by the number of words
+            if hi + 1 >= n or his[hi + 1][0] - his[hi][1] >= JOIN_GAP:
+                break
+            r, joined, alone = ratio(lo, hi), ratio(lo, hi + 1), ratio(hi + 1, hi + 1)
+            if verdict(r) == "ok":
+                if verdict(alone) == "ok" or verdict(joined) != "ok":
+                    break
+            elif abs(math.log(joined)) >= abs(math.log(r)):
+                break
+            hi += 1
+        t0, t1 = his[lo][0], his[hi][1]
+        u0, u1 = theirs[lo][0], theirs[hi][1]
+        ceiling = his[hi + 1][0] if hi + 1 < n else his_total
+        t0, t1 = absorb(t0, t1, u0, u1, floor, ceiling)
+        ratio = (t1 - t0) / (u1 - u0)
+        segs.append({"words": list(range(lo, hi + 1)), "src": (round(u0, 4), round(u1, 4)),
+                     "dst": (round(t0, 4), round(t1, 4)), "ratio": round(ratio, 3),
+                     "level": "phrase" if hi > lo else "word", "verdict": verdict(ratio)})
+        floor = t1
+        i = hi + 1
+    return segs
+
+
+def snap_spans(samples, rate, spans):
+    """
+    WORD EDGES MOVED ONTO THE SOUND.
+
+    Whisper places a word boundary from attention, not from the waveform, and it is commonly
+    30-80 ms out — which is most of the lip sync budget before a single sample has been stretched.
+    Each edge looks 50 ms either way in 10 ms frames: a start moves to the first loud frame after
+    a quiet one, an end to the last loud frame before a quiet one. Where speech runs straight
+    through (no quiet frame in reach) the quietest frame is taken. Where nothing is loud the edge
+    stays put: stretching a little silence is harmless, and cutting a consonant is not.
+    """
+    if not samples or not spans:
+        return list(spans)
+    hop = max(1, int(rate * FRAME))
+    rms = []
+    for k in range(0, len(samples), hop):
+        chunk = samples[k:k + hop]
+        rms.append((sum(x * x for x in chunk) / len(chunk)) ** 0.5)
+    ordered = sorted(rms)
+    quiet = max(ordered[len(ordered) // 5] * 3.0, ordered[-1] * 0.03, 1.0)
+    loud = [v > quiet for v in rms]
+    total = len(samples) / rate
+    w = int(round(0.05 / FRAME))
+    out = []
+    floor = 0
+    for idx, (t0, t1) in enumerate(spans):
+        nxt = spans[idx + 1][0] if idx + 1 < len(spans) else total
+        f0, f1 = int(round(t0 / FRAME)), int(round(t1 / FRAME))
+        new0, new1 = t0, t1                          # an edge that is not moved keeps its exact value
+        a, b = max(floor, f0 - w), min(len(rms) - 1, f0 + w, max(f0, f1 - 1))
+        if a <= b and any(loud[a:b + 1]):
+            first = next(k for k in range(a, b + 1) if loud[k])
+            if first > a or (a > 0 and not loud[a - 1]):
+                f0 = first
+            else:
+                f0 = min(range(a, b + 1), key=lambda k: rms[k])
+            new0 = f0 * FRAME
+        c, d = max(f0 + 1, f1 - w), min(len(rms) - 1, f1 + w, int(round(nxt / FRAME)))
+        if c <= d and any(loud[c:d + 1]):
+            last = max(k for k in range(c, d + 1) if loud[k])
+            if last < d or (d + 1 < len(rms) and not loud[d + 1]):
+                f1 = last + 1
+            else:
+                f1 = min(range(c, d + 1), key=lambda k: rms[k])
+            new1 = f1 * FRAME
+        if new1 <= new0:
+            new1 = new0 + FRAME
+        out.append((new0, min(new1, total)))
+        floor = int(round(new1 / FRAME))
+    return out
+
+
+def stretch_filter(tempo, have_rubberband):
+    """
+    rubberband keeps the formants where atempo does not, which is the difference between a voice
+    and a voice played slowly. atempo is the fallback, and its floor of 0.5 is chained around.
+    """
+    if have_rubberband:
+        return "rubberband=tempo=%.6f:pitchq=quality:formant=preserved" % tempo
+    parts = []
+    t = tempo
+    for _ in range(8):                                # bounded: 0.5^8 is far past any real ratio
+        if t >= 0.5:
+            break
+        parts.append("atempo=0.5")
+        t /= 0.5
+    parts.append("atempo=%.6f" % min(t, 100.0))
+    return ",".join(parts)
+
+
+def has_rubberband(ff):
+    try:
+        r = subprocess.run([ff, "-hide_banner", "-filters"], capture_output=True, text=True, timeout=20)
+        return " rubberband " in r.stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def render_plan(ff, their_wav, their_total, segs, frames, rate):
+    """
+    A silent track exactly as long as his take, and every segment laid onto it at his time.
+
+    Each segment is cut with PAD of context either side, stretched, and the middle taken back out,
+    so rubberband's start-up and tail land in the part that is thrown away rather than on the
+    first consonant. Then 5 ms fades at both ends. Returns (samples, filter name, why).
+    """
+    rb = has_rubberband(ff)
+    track = [0] * frames
+    for seg in segs:
+        u0, u1 = seg["src"]
+        t0, t1 = seg["dst"]
+        s0, s1 = max(0.0, u0 - PAD), min(their_total, u1 + PAD)
+        tempo = (u1 - u0) / (t1 - t0)
+        cmd = [ff, "-hide_banner", "-loglevel", "error", "-ss", "%.4f" % s0, "-t", "%.4f" % (s1 - s0),
+               "-i", their_wav, "-af", stretch_filter(tempo, rb) + ",aresample=%d" % rate,
+               "-ac", "1", "-f", "s16le", "-acodec", "pcm_s16le", "pipe:1"]
+        try:
+            r = subprocess.run(cmd, capture_output=True, timeout=60)
+        except (OSError, subprocess.SubprocessError) as e:
+            return None, "", "ffmpeg did not run: %s" % str(e)[:120]
+        if r.returncode != 0:
+            return None, "", "ffmpeg refused a segment: %s" % r.stderr.decode("utf-8", "replace")[-160:]
+        got = list(struct.unpack("<%dh" % (len(r.stdout) // 2), r.stdout[:len(r.stdout) // 2 * 2]))
+        lead = int(round((u0 - s0) / tempo * rate))
+        want = int(round((t1 - t0) * rate))
+        piece = got[lead:lead + want]
+        piece += [0] * (want - len(piece))
+        fade = min(int(FADE * rate), want // 2)
+        for k in range(fade):
+            g = k / fade
+            piece[k] = int(piece[k] * g)
+            piece[want - 1 - k] = int(piece[want - 1 - k] * g)
+        at = int(round(t0 * rate))
+        for k, v in enumerate(piece):
+            j = at + k
+            if 0 <= j < frames:
+                track[j] = max(-32768, min(32767, track[j] + v))
+    return track, ("rubberband" if rb else "atempo"), ""
+
+
+def voice_api(method, path, body=None, ctype="application/json", timeout=90):
+    """(json or None, why). MANTRA_VOICE's own words when it has them, a sentence when it does not."""
+    code, raw = http(method, VOICE_API + path, {"Content-Type": ctype} if body is not None else None,
+                     body, timeout)
+    if code == -1:
+        return None, ("MANTRA_VOICE is not answering at %s. Start it from the star menu's Voices "
+                      "switch, or: python3 ~/Developer/MANTRA_VOICE/voiced.py" % VOICE_API)
+    try:
+        j = json.loads(raw.decode("utf-8", "replace"))
+    except ValueError:
+        return None, "MANTRA_VOICE answered HTTP %d with something that is not JSON" % code
+    if code != 200 or (isinstance(j, dict) and j.get("error")):
+        said = (j.get("error") if isinstance(j, dict) else "") or "HTTP %d" % code
+        return None, "MANTRA_VOICE: %s" % re.sub(r"^ERROR\s+", "", str(said))
+    return j, ""
+
+
+# ── consent, and the badge that says where a voice may go ──
+#
+# A CLONED VOICE WITH NO NOTE OF WHO GAVE IT, WHEN, AND FOR WHAT is the one that causes trouble in
+# two years when nobody remembers. The note lives in meta.json beside ref.wav in MANTRA_VOICE, so
+# every app on the Mac that lists voices sees it, not only this one.
+#
+# USAGE IS TWO WORDS, NOT A SCALE. public: cleared for something people will see. private: for
+# trying things, and nothing made with it leaves this Mac. A voice with no consent recorded is
+# treated as stricter than private, because "nobody wrote it down" is not permission.
+
+def consent_problem(c, today):
+    """None, or the sentence to show. `today` is YYYY-MM-DD, passed in so the rule can be tested."""
+    if not isinstance(c, dict):
+        return "the consent note is missing"
+    if not str(c.get("who") or "").strip():
+        return "say who gave this voice"
+    if not str(c.get("what_for") or "").strip():
+        return "say what they gave it for"
+    if c.get("usage") not in USAGES:
+        return "choose public or private"
+    when = str(c.get("when") or "").strip()
+    if when and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", when):
+        return "the date should read like %s" % today
+    if when and when > today:
+        return "permission cannot be dated in the future"
+    return None
+
+
+def consent_record(c, today):
+    """Only the four fields, stripped, with the date defaulting to today."""
+    return {"who": " ".join(str(c.get("who")).split()), "when": str(c.get("when") or "").strip() or today,
+            "what_for": " ".join(str(c.get("what_for")).split()), "usage": c.get("usage")}
+
+
+def voice_badge(meta):
+    """{usage, label, release} from a MANTRA_VOICE voice entry."""
+    c = (meta or {}).get("consent") or {}
+    if consent_problem(c, "9999-12-31") is not None:
+        return {"usage": "none", "label": "no consent recorded", "release": False}
+    if c["usage"] == "public":
+        return {"usage": "public", "label": "public", "release": True}
+    return {"usage": "private", "label": "private, for experiments", "release": False}
+
+
+STRICTNESS = {"public": 0, "private": 1, "none": 2}
+
+
+def stricter(a, b):
+    """The usage that wins when a cell's snapshot and the voice's current note disagree. A voice
+    made public later does not make an old take public by surprise, and a voice withdrawn later
+    makes every take made with it private at once — the stricter word always wins."""
+    a = a if a in STRICTNESS else "none"
+    if b not in STRICTNESS:
+        return a
+    return a if STRICTNESS[a] >= STRICTNESS[b] else b
+
+
+def release_suffix(meta, playing):
+    """
+    THE WARNING TRAVELS IN THE FILE NAME. A downloaded take goes into a Resolve bin under the words
+    it says, and there nothing else about it is visible. So a take made with a voice that is not
+    cleared for release says so where it will be read: in the name, beside the words.
+    """
+    engine = os.path.splitext(os.path.basename(playing))[0]
+    if not engine.startswith("transform-") or meta.get("voice") != engine:
+        return ""
+    usage = meta.get("transform_usage") or "none"
+    live, _ = voice_api("GET", "/voices", timeout=3)
+    if isinstance(live, dict):
+        name = meta.get("transform_voice", "")
+        for v in live.get("voices", []):
+            if v.get("name") == name:
+                usage = stricter(usage, voice_badge(v)["usage"])
+    if usage == "public":
+        return " (voice %s)" % meta.get("transform_voice", "")
+    return " (PRIVATE voice %s, not for release)" % meta.get("transform_voice", "")
+
+
+def engine_for(voice):
+    return "transform-" + re.sub(r"[^A-Za-z0-9_-]", "_", voice)[:40]
+
+
+@app.route("/api/clones")
+def clones():
+    """The voices on MANTRA_VOICE, each with its badge. Free and local, so nothing about keys."""
+    j, why = voice_api("GET", "/voices", timeout=5)
+    if j is None:
+        return jsonify({"ok": False, "why": why, "voices": []})
+    out = []
+    for v in j.get("voices", []):
+        out.append({"name": v.get("name"), "text": v.get("text", ""), "consent": v.get("consent") or None,
+                     "badge": voice_badge(v)})
+    return jsonify({"ok": True, "voices": out, "ffmpeg": bool(ffmpeg_path())})
+
+
+@app.route("/api/clones/add", methods=["POST"])
+def clone_add():
+    """
+    A NEW VOICE FROM A FILE HE PICKS, AND IT CANNOT BE ADDED WITHOUT THE CONSENT NOTE.
+
+    The upload is kept under ~/.sampleplayer-web/voice-sources rather than deleted, because
+    MANTRA_VOICE writes the source path into meta.json so the reference can be cut again later.
+    """
+    today = time.strftime("%Y-%m-%d")
+    f = request.files.get("file")
+    form = request.form
+    consent = {k: form.get(k, "") for k in ("who", "when", "what_for", "usage")}
+    problem = consent_problem(consent, today)
+    name = re.sub(r"[^A-Za-z0-9_-]", "_", (form.get("name") or "").strip())[:40]
+    if not f or not f.filename:
+        return jsonify({"ok": False, "why": "choose a recording first"})
+    if not name:
+        return jsonify({"ok": False, "why": "give the voice a name"})
+    if problem:
+        return jsonify({"ok": False, "why": problem})
+    src_dir = os.path.join(APPDIR, "voice-sources")
+    os.makedirs(src_dir, exist_ok=True)
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", f.filename)[-80:]
+    src = os.path.join(src_dir, "%d_%s" % (int(time.time()), safe))
+    f.save(src)
+    body = json.dumps({"name": name, "source": src, "start": form.get("start") or 0,
+                       "length": form.get("length") or 12, "consent": consent_record(consent, today)})
+    j, why = voice_api("POST", "/add", body.encode(), timeout=320)
+    if j is None:
+        return jsonify({"ok": False, "why": why})
+    return jsonify({"ok": True, "name": j.get("name", name)})
+
+
+@app.route("/api/clones/consent", methods=["POST"])
+def clone_consent():
+    """The note for a voice that was added before notes existed, or corrected afterwards."""
+    b = request.get_json(force=True) or {}
+    today = time.strftime("%Y-%m-%d")
+    problem = consent_problem(b, today)
+    if problem:
+        return jsonify({"ok": False, "why": problem})
+    body = json.dumps({"name": b.get("name", ""), "consent": consent_record(b, today)})
+    j, why = voice_api("POST", "/consent", body.encode(), timeout=10)
+    return jsonify({"ok": j is not None, "why": why})
+
+
+def transform_cell(pid, slot, voice):
+    """(report, why). Everything that can fail says which of its five steps it failed at."""
+    wav = original(pid, slot)
+    if not os.path.isfile(wav):
+        return None, "nothing recorded in that cell"
+    ff = ffmpeg_path()
+    if not ff:
+        return None, "the transform needs ffmpeg (brew install ffmpeg), the same one MANTRA_VOICE uses"
+    listing, why = voice_api("GET", "/voices", timeout=5)
+    if listing is None:
+        return None, why
+    entry = next((v for v in listing.get("voices", []) if v.get("name") == voice), None)
+    if entry is None:
+        return None, "MANTRA_VOICE has no voice called %s" % voice
+
+    with open(wav, "rb") as fh:
+        take = fh.read()
+    heard, why = voice_api("POST", "/hear?words=1", take, "audio/wav", timeout=320)
+    if heard is None:
+        return None, "listening to your take: " + why
+    # THE "d" IN /hear IS THE END TIME, NOT A DURATION. ears.py writes round(w.end, 3) into it; the
+    # example in API.md reads like a duration and the brief said "start and duration". Taken at its
+    # word it would put every one of their words in the wrong place.
+    words = [(re.sub(r"\s+", "", w.get("w", "")), w.get("t", 0), w.get("d", 0))
+             for w in heard.get("words", [])]
+    words = [w for w in words if w[0]]
+    if not words:
+        return None, "no words were heard in your take"
+    text = " ".join(w[0] for w in words)
+
+    # engine IS SENT, AND CHECKED ON THE WAY BACK. /say takes the engine from the Mac-wide setting
+    # when none is named, so with the computer's voice set to Beatrice a clone's name would be
+    # spoken by Speechify, billed, and reported under the clone's name.
+    said, why = voice_api("POST", "/say", json.dumps({"text": text, "engine": "clone", "voice": voice}).encode(),
+                          timeout=600)
+    if said is None:
+        return None, "the cloned voice: " + why
+    if said.get("engine") != "clone" or said.get("voice") != voice:
+        return None, "MANTRA_VOICE answered with %s/%s, not the clone %s" % (said.get("engine"), said.get("voice"), voice)
+    tokens = said.get("tokens") or []
+    if len(tokens) != len(words):
+        return None, "the clone's words (%d) do not line up with yours (%d)" % (len(tokens), len(words))
+    code, mp3 = http("GET", VOICE_API + said.get("url", ""), timeout=30)
+    if code != 200 or not mp3:
+        return None, "could not fetch the clone's audio (HTTP %d)" % code
+
+    tmp = os.path.join(APPDIR, "tmp-transform")
+    os.makedirs(tmp, exist_ok=True)
+    mp3_path, theirs_wav = os.path.join(tmp, "clone.mp3"), os.path.join(tmp, "clone.wav")
+    with open(mp3_path, "wb") as fh:
+        fh.write(mp3)
+    try:
+        r = subprocess.run([ff, "-hide_banner", "-loglevel", "error", "-y", "-i", mp3_path, "-ac", "1",
+                            "-ar", str(RATE), "-c:a", "pcm_s16le", theirs_wav], capture_output=True, timeout=60)
+    except (OSError, subprocess.SubprocessError) as e:
+        return None, "ffmpeg did not run: %s" % str(e)[:120]
+    if r.returncode != 0:
+        return None, "ffmpeg could not read the clone's audio"
+
+    mine, rate = read_samples(wav)
+    theirs, trate = read_samples(theirs_wav)
+    if not mine or not theirs:
+        return None, "one of the two recordings is empty"
+    his_total, their_total = len(mine) / rate, len(theirs) / trate
+    his = snap_spans(mine, rate, _clean_spans([(w[1], w[2]) for w in words], his_total))
+    their = snap_spans(theirs, trate, _clean_spans([(t.get("t", 0), t.get("d", 0)) for t in tokens], their_total))
+    segs = plan_stretch(his, their, his_total, their_total)
+    track, filt, why = render_plan(ff, theirs_wav, their_total, segs, len(mine), rate)
+    if track is None:
+        return None, why
+
+    engine = engine_for(voice)
+    write_wav(generated(pid, slot, engine), track, rate)       # gen/, one level down: never original.wav
+    badge = voice_badge(entry)
+    counts = {k: sum(len(s["words"]) for s in segs if s["verdict"] == k) for k in ("ok", "smear", "chirp")}
+    worst = max((s["ratio"] if s["ratio"] >= 1 else 1 / s["ratio"] for s in segs), default=1.0)
+    write_meta(pid, slot, {"voice": engine, "transform_voice": voice, "transform_usage": badge["usage"],
+                           "transform_report": "ok %d smear %d chirp %d worst %.2fx %s" % (
+                               counts["ok"], counts["smear"], counts["chirp"], worst, filt)})
+    return {"engine": engine, "filter": filt, "badge": badge, "counts": counts, "worst": round(worst, 2),
+            "segments": [{"words": " ".join(words[k][0] for k in s["words"]), "ratio": s["ratio"],
+                          "level": s["level"], "verdict": s["verdict"], "at": s["dst"][0]} for s in segs]}, ""
+
+
+@app.route("/api/transform/<int:slot>", methods=["POST"])
+def do_transform(slot):
+    pid = request.args.get("project", "project-01")
+    voice = (request.get_json(force=True) or {}).get("voice", "")
+    if not voice:
+        return jsonify({"ok": False, "why": "choose a cloned voice first"})
+    report, why = transform_cell(pid, slot, voice)
+    if report is None:
+        return jsonify({"ok": False, "why": why})
+    return jsonify({"ok": True, "report": report})
 
 
 @app.route("/api/preview", methods=["POST"])

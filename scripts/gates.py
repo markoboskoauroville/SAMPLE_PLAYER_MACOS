@@ -258,6 +258,40 @@ check("G6", "the network wrapper catches everything",
 check("G6", "the updater refuses a bad download",
       "did not parse" in updater_src and "looks wrong" in updater_src,
       "size, shebang, bash -n, ast.parse, doctype — then nothing was changed")
+
+
+def body_of(name):
+    """
+    One function's code, comments gone. An EMPTY SLICE IS A FAILURE, never a pass: a renamed
+    function would otherwise satisfy every "does not contain" below by containing nothing at all.
+    """
+    m = re.search(r"\ndef %s\(.*?(?=\n(?:def |@app\.|# ──|[A-Z_]+ = ))" % re.escape(name), server_code, re.S)
+    return m.group(0) if m else ""
+
+
+# THE VOICE TRANSFORM, 11.9.2026. What the four tests cannot see is whether the next change quietly
+# removes a protection, so each one is asserted where it lives.
+transform = body_of("transform_cell")
+adder = body_of("clone_add")
+fetch = body_of("download")
+listing = body_of("state")
+local = server_code[server_code.find("VOICE_API = "):server_code.find('@app.route("/api/preview"')]
+check("G6", "the transform writes beside the take, never over it",
+      len(transform) > 2000 and transform.count("write_wav(") == 1 and "write_wav(generated(" in transform,
+      "%d characters of transform_cell, one write, into gen/" % len(transform))
+check("G6", "the transform names the clone and checks the answer",
+      '"engine": "clone"' in transform and 'said.get("engine") != "clone"' in transform,
+      "without it a Mac set to Beatrice bills Speechify under a clone's name")
+check("G6", "a voice is not added without its consent note",
+      len(adder) > 500 and -1 < adder.find("consent_problem(") < adder.find("if problem:") < adder.find(".save("),
+      "the note is checked before the upload is even kept")
+check("G6", "a take not cleared for release says so in its file name",
+      "release_suffix(" in fetch and len(fetch) > 200, "the name is all a Resolve bin shows")
+check("G6", "only .wav files are counted as generated voices",
+      "generated_voices(" in listing, "a .DS_Store is not a voice")
+check("G2", "the local engine has no key, no probe and no spend line",
+      len(local) > 10000 and not any(w in local for w in ("ring(", "log_spend(", "work_probe(", "KEYS_FILE", "condemn(")),
+      "%d characters of the transform section examined" % len(local))
 skip("G6", "the soak and the monkey", "needs a Mac with a microphone and a browser")
 
 # ── G7 BUDGETS ────────────────────────────────────────────────────────────────────────────────
@@ -327,7 +361,7 @@ if notrun:
     print("NOT RUN, and why:")
     for n in notrun:
         print("   " + n)
-if checks < 45:
+if checks < 51:
     sys.exit("only %d checks ran: this file is broken, not the app" % checks)
 if failures:
     print()
