@@ -512,3 +512,15 @@ Each session adds a line: date, what was ticked, commits, what is blocking.
                Chrome. Committed, NOT pushed (app files need his yes). The new gate found the
                gates' comment stripper eating nine tenths of the page since the first edition;
                fixed, one false-red check narrowed, the face written into the manifest (6a).
+    11.9.2026  BABA STOPPED PATH A: "The cloned voices are bad on their own, before any transform.
+               Stop all Path A work. Fix the cloning first, measuring, not guessing." 2.5, 2.6, 2.8,
+               2.9 and Part 5.4 wait until the cloning is right; nothing in MANTRA_VOICE changes
+               until he has listened. The eight references measured (24 kHz mono, none clipped,
+               every ref.txt present, the ears agree with ref.txt word for word on 7 of 8; voice1
+               3 word errors, "200" for "Two hundred"): actress1 12.0 s -23.0 LUFS floor -81.5;
+               gwyneth 12.0 s -19.9 LUFS floor -77.3; marko 8.0 s -18.8 LUFS floor -35.7 (a NOISY
+               room, thirty dB louder than the others); old_actor 12.0 s -21.2 floor -82.1; rowan
+               10.7 s -21.1 floor -79.8; snoop 12.0 s -21.9 floor -64.5; voice 3.9 s -31.9 LUFS
+               peak -16.3 (SHORT and QUIET); voice1 12.1 s -18.7 floor -64.8. The references are
+               not the obvious fault except voice and marko; the controlled test decides: his 15 s
+               in a quiet room with the words typed, cloned by every model, in ~/Desktop/clone-test.
