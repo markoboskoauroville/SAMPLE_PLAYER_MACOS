@@ -11,10 +11,9 @@ new session knows where to continue. When every box is ticked, say so to Baba an
 
 ## THE NETWORK
 
-**Baba is often on a corporate network where outbound SSH on port 22 is blocked.** Anything that uses
-`ssh` to the Oracle machine will time out there. The brief's Part 0.3 measures what gets through and
-Part 4.0 sets up a route; do not start Oracle work before both are done, and ask Baba before carrying
-SSH through the company's network in any form.
+No network rule. **Withdrawn 2.11.2026 (Baba: "I am not anymore in that company and this rule does not apply anymore. Please delete it.").** The old rule, 11.9.2026, read: "Baba is often on a corporate network where
+outbound SSH on port 22 is blocked … ask Baba before carrying SSH through the company's network in any
+form." `ssh teacher-vm` is used directly; if port 22 does not answer, say so and ask, nothing more.
 
 ## BEFORE ANYTHING
 
@@ -41,14 +40,12 @@ new test is not believed until it has been seen failing on the old code.
 - **Secrets are never printed**, not in a command, a log, a commit or a message. Keys live in
   `~/Developer/api/`. Length and first four characters only.
 - **A local engine needs no key, no credit probe and no spend line.**
-- **Ask before:** tunnelling SSH through the company network, restarting or resizing the Oracle machine, anything that costs money, writing
+- **Ask before:** restarting or resizing the Oracle machine, anything that costs money, writing
   anybody's consent note (the words are his), deleting anything, and pushing to `main` or `master`.
   **Baba, 11.9.2026: the brief, its log and the records (`CLAUDE_CODE_FINISH.md`, `DELIVERY_RECORD.md`,
   `HANDOFF.md`, `DEVELOPMENT.md`, `CLAUDE.md`) may be pushed without asking. Any change to `server.py`,
   `static/index.html`, the installer or `update.sh` still needs his yes before it is pushed.**
-- **SSH through the company network is not allowed** (Baba, 11.9.2026): no tunnel, no Cloudflare SSH
-  route. Anything that needs a shell on the Oracle machine waits for his phone hotspot or home, and is
-  kept ready as the list under 4.0 in the brief so it runs the moment port 22 answers.
+- ~~SSH through the company network is not allowed (Baba, 11.9.2026)~~ **Withdrawn 2.11.2026 (Baba: "I am not anymore in that company and this rule does not apply anymore. Please delete it.").**
 - **Never create a second Oracle machine, not even for a test** (Baba, 11.9.2026). At 4 OCPUs and 24 GB
   the one machine uses almost the whole free allowance of a paid tenancy; a test machine for a day goes over it.
 - **Do not touch** `MANTRA_MANIFEST/EXCHANGE.md` or anything belonging to THE BRAIN BRAKE.

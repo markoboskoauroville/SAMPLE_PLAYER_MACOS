@@ -18,7 +18,10 @@ repository [`DELIVERY_RECORD.md`](DELIVERY_RECORD.md) (what was measured and wha
 
 Open Claude Code on the Mac, in any folder, and paste this one sentence:
 
-    Clone or pull github.com/markoboskoauroville/SAMPLE_PLAYER_MACOS into ~/Developer, read CLAUDE.md and CLAUDE_CODE_FINISH.md there, and do every step in order; I am on a corporate network where outbound SSH on port 22 is blocked.
+    Clone or pull github.com/markoboskoauroville/SAMPLE_PLAYER_MACOS into ~/Developer, read CLAUDE.md and CLAUDE_CODE_FINISH.md there, and do every step in order.
+
+(2.11.2026: the old sentence ended "I am on a corporate network where outbound SSH on port 22 is
+blocked"; Baba is no longer at that company, so the network rule is withdrawn.)
 
 To continue on another day, open Claude Code in `~/Developer/SAMPLE_PLAYER_MACOS` and type `claude -c`,
 or paste the same sentence into a new session: the ticks in this file say where to pick up.
@@ -201,8 +204,10 @@ Maha, the portal, Flask Maha and Claude Toki all live on that one machine.
 
 Everything on the machine is installed from the internet, never copied from the Mac (Baba, 7.9.2026).
 
-**Every `ssh` above assumes port 22 is open, and on Baba's corporate network it is not.** `remote.py`,
-`walk.py` and the ssh lines in `second.sh`'s instructions will all time out there. Part 4.0 comes first.
+**Withdrawn 2.11.2026 (Baba: "I am not anymore in that company and this rule does not apply anymore. Please delete it.").** The corporate-network rule below (4.0, the routes, THE HOTSPOT LIST) is history: Baba is no longer
+on that network, so `ssh teacher-vm` is used directly, and `oracle/hotspot.sh` is simply the shell list
+run in one go. The old line read: "Every `ssh` above assumes port 22 is open, and on Baba's corporate
+network it is not." 
 
 - [x] **4.0 A way to the machine that does not need outbound port 22.** *Answered 11.9.2026. Baba:
   "treat SSH through the company network as not allowed. Do not build the Cloudflare route." So route 1
@@ -541,3 +546,8 @@ Each session adds a line: date, what was ticked, commits, what is blocking.
                peak -16.3 (SHORT and QUIET); voice1 12.1 s -18.7 floor -64.8. The references are
                not the obvious fault except voice and marko; the controlled test decides: his 15 s
                in a quiet room with the words typed, cloned by every model, in ~/Desktop/clone-test.
+    2.11.2026  Baba: "I am not anymore in that company and this rule does not apply anymore. Please
+               delete it." The corporate-network rule (no SSH through the company network, the
+               hotspot-or-home wait, ask before tunnelling) is withdrawn in CLAUDE.md, README.md,
+               WHERE_WE_STOPPED.md and this brief; MANTRA_MANIFEST/MEMORY.md and ABLETON_TEACHER's
+               remote.py, hotspot.sh and lessons corrected the same day.

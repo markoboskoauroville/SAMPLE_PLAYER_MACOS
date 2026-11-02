@@ -45,8 +45,8 @@ GitHub's `main` was at **1cb31e2, pushed 19:11**. Two things came after it and w
   one-euro budget alarm exists and emails his auroville address. The cost check (4.6) is one week after
   the day he upgrades. **The trial ends around 7.10.2026: the upgrade must happen before then.** Never a
   second Oracle machine, even for a test.
-- **No SSH through the company network** and no Cloudflare SSH route. `oracle/hotspot.sh` is ready,
-  proven to stop cleanly at step 1 on the corporate network.
+- ~~No SSH through the company network and no Cloudflare SSH route.~~ **Withdrawn 2.11.2026 (Baba: "I am not anymore in that company and this rule does not apply anymore. Please delete it.").** `oracle/hotspot.sh` runs
+  from any network.
 - **Croatian lines: not now.**
 - Pushing the brief, the log and the records needs no asking; `server.py`, `index.html`, the installer
   and `update.sh` need his yes.
@@ -60,4 +60,4 @@ GitHub's `main` was at **1cb31e2, pushed 19:11**. Two things came after it and w
 3. **The exact words of cell 8's first three sentences**, so qwen06 can run again with the right words.
 4. **The larger qwen: yes or no** to a 3.1 GB download through the Download Monitor.
 5. **The day he upgrades Oracle** to Pay As You Go — write it into 4.6.
-6. **On his phone hotspot or at home:** run the hotspot list under Part 4 (about ten minutes).
+6. **Run the hotspot list under Part 4** (about ten minutes); any network will do since 2.11.2026.
